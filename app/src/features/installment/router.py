@@ -1,6 +1,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Request, status
+from src.integration_context.constants import SCOPE_INSTALLMENT
+from src.integration_context.deps import IntegrationContextDep
+from src.integration_context.helpers import employee_id_from_context
 from src.routers import api_prefix_config
 
 from .auth import InstallmentBasicAuthDep
@@ -43,8 +46,11 @@ router = APIRouter(prefix=api_prefix_config.v1.installment_ff, tags=["Installmen
 )
 async def get_ff_products(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     ff_service: FFServiceDep,
 ) -> FFProductsResponse:
+    if context is not None:
+        context.require_scope(SCOPE_INSTALLMENT)
     return await ff_service.get_products()
 
 
@@ -96,9 +102,12 @@ async def list_provider_products(
 )
 async def list_allowed_banks(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     client_request_id: int,
     ff_service: FFServiceDep,
 ) -> AllowedBankListResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_INSTALLMENT, client_request_id)
     return await ff_service.get_allowed_banks_for_client_request(client_request_id)
 
 
@@ -109,9 +118,12 @@ async def list_allowed_banks(
 )
 async def list_applications(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     client_request_id: int,
     ff_service: FFServiceDep,
 ) -> InstallmentApplicationListResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_INSTALLMENT, client_request_id)
     items = await ff_service.get_applications_by_client_request(client_request_id)
     return InstallmentApplicationListResponse(items=items, total=len(items))
 
@@ -129,9 +141,15 @@ async def list_applications(
 )
 async def create_application(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     request: CreateInstallmentApplicationRequest,
     ff_service: FFServiceDep,
 ) -> CreateInstallmentApplicationResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_INSTALLMENT, request.client_request_id)
+        request = request.model_copy(
+            update={"created_by": employee_id_from_context(context, fallback=request.created_by)}
+        )
     return await ff_service.create_application(request)
 
 
@@ -144,12 +162,15 @@ async def create_application(
 )
 async def get_application(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[
         int,
         Path(description="ID в installment_application_tab", examples=[1]),
     ],
     ff_service: FFServiceDep,
 ) -> InstallmentApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_INSTALLMENT, application_id)
     return await ff_service.get_application_by_id(application_id)
 
 
@@ -165,6 +186,7 @@ async def get_application(
 )
 async def apply_application(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[
         int,
         Path(description="ID в installment_application_tab", examples=[1]),
@@ -172,9 +194,14 @@ async def apply_application(
     request: ApplyInstallmentApplicationRequest,
     ff_service: FFServiceDep,
 ) -> ApplyInstallmentApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_INSTALLMENT, application_id)
+        created_by = employee_id_from_context(context, fallback=request.created_by)
+    else:
+        created_by = request.created_by
     return await ff_service.apply_application_to_deal(
         application_id,
-        created_by=request.created_by,
+        created_by=created_by,
     )
 
 
@@ -187,12 +214,15 @@ async def apply_application(
 )
 async def poll_application(
     _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[
         int,
         Path(description="ID в installment_application_tab", examples=[1]),
     ],
     ff_service: FFServiceDep,
 ) -> InstallmentApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_INSTALLMENT, application_id)
     return await ff_service.poll_application(application_id)
 
 

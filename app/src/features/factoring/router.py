@@ -2,6 +2,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import Response
+from src.integration_context.constants import SCOPE_FACTORING
+from src.integration_context.deps import IntegrationContextDep
+from src.integration_context.helpers import employee_id_from_context
 from src.routers.config import api_prefix_config
 
 from .auth import FactoringBasicAuthDep
@@ -40,8 +43,11 @@ router = APIRouter(prefix=api_prefix_config.v1.factoring_ff, tags=["Factoring (F
 )
 async def get_provider_config(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     service: FactoringServiceDep,
 ) -> FactoringProviderConfigResponse:
+    if context is not None:
+        context.require_scope(SCOPE_FACTORING)
     return await service.get_provider_config()
 
 
@@ -52,9 +58,12 @@ async def get_provider_config(
 )
 async def list_applications(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     client_request_id: int,
     service: FactoringServiceDep,
 ) -> FactoringApplicationListResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, client_request_id)
     items = await service.get_applications_by_client_request(client_request_id)
     return FactoringApplicationListResponse(items=items, total=len(items))
 
@@ -83,9 +92,15 @@ async def create_application_disabled(_: FactoringBasicAuthDep) -> None:
 )
 async def prepare_documents(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     request: PrepareFactoringDocumentsRequest,
     service: FactoringServiceDep,
 ) -> PrepareFactoringDocumentsResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, request.client_request_id)
+        request = request.model_copy(
+            update={"created_by": employee_id_from_context(context, fallback=request.created_by)}
+        )
     return await service.prepare_documents(request)
 
 
@@ -101,9 +116,12 @@ async def prepare_documents(
 )
 async def prescoring_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     request: PrescoringFactoringRequest,
     service: FactoringServiceDep,
 ) -> PrescoringFactoringResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, request.client_request_id)
     return await service.run_prescoring(request)
 
 
@@ -114,9 +132,12 @@ async def prescoring_application(
 )
 async def refresh_sign_status(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[1])],
     service: FactoringServiceDep,
 ) -> PrepareFactoringDocumentsResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.refresh_sign_status(application_id)
 
 
@@ -128,10 +149,13 @@ async def refresh_sign_status(
 )
 async def submit_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[1])],
     request: SubmitFactoringApplicationRequest,
     service: FactoringServiceDep,
 ) -> CreateFactoringApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.submit_application(application_id, request)
 
 
@@ -190,12 +214,15 @@ async def send_cession(
 )
 async def get_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[
         int,
         Path(description="ID в installment_application_tab (product_type = FACTORING)", examples=[1]),
     ],
     service: FactoringServiceDep,
 ) -> FactoringApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.get_application_by_id(application_id)
 
 
@@ -206,10 +233,13 @@ async def get_application(
 )
 async def create_refund(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[29])],
     request: CreateFactoringRefundRequest,
     service: FactoringServiceDep,
 ) -> FactoringRefundResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.create_refund(application_id, request)
 
 
