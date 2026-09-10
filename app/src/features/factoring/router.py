@@ -64,7 +64,7 @@ async def list_applications(
 ) -> FactoringApplicationListResponse:
     if context is not None:
         context.require_client_request(SCOPE_FACTORING, client_request_id)
-    items = await service.get_applications_by_client_request(client_request_id)
+    items = await service.get_applications_for_client(client_request_id)
     return FactoringApplicationListResponse(items=items, total=len(items))
 
 
@@ -223,7 +223,24 @@ async def get_application(
 ) -> FactoringApplicationResponse:
     if context is not None:
         context.require_application(SCOPE_FACTORING, application_id)
-    return await service.get_application_by_id(application_id)
+    return await service.get_application_for_client(application_id)
+
+
+@router.get(
+    "/applications/{application_id}/print-forms/{name}",
+    summary="PDF печатной формы (CRM proxy, Basic Auth + context)",
+)
+async def download_print_form_authenticated(
+    _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
+    application_id: Annotated[int, Path(examples=[1])],
+    name: str,
+    service: FactoringServiceDep,
+) -> Response:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
+    pdf = await service.download_print_form_authenticated(application_id, name)
+    return Response(content=pdf, media_type="application/pdf")
 
 
 @router.post(

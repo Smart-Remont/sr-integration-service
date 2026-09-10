@@ -62,6 +62,8 @@ VALID_WEBHOOK_STATUSES = {"REJECTED", "APPROVED", "ALTERNATIVE", "ISSUED", "PEND
 ACTIVE_PREPARE_STATUSES = {"WAITING_SIGN", "NEW", "IN_PROGRESS", "PENDING", "APPROVED", "ALTERNATIVE"}
 TERMINAL_WEBHOOK_STATUSES = {"ISSUED", "REJECTED", "REVERSED"}
 PRINT_FORMS_CACHE_DIR = Path(gettempdir()) / "factoring-print-forms"
+PRINT_FORM_PUBLIC_URL_TTL_SEC = 72 * 3600
+PRINT_FORM_CACHE_TTL_SEC = 15 * 60
 ALMATY_TZ = ZoneInfo("Asia/Almaty")
 CESSION_TEMPLATE_CODE = "FF_FACTORING_CESSION"
 
@@ -186,20 +188,11 @@ class FactoringService(BaseService):
             partner=partner,
             principal=request.principal,
         )
-        if not prescoring.skipped and prescoring.status == "REJECTED":
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=prescoring.message or "Клиент не прошёл прескоринг (REJECTED).",
-            )
-        if not prescoring.skipped and prescoring.max_limit is not None:
-            if request.principal > prescoring.max_limit:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        f"Сумма {request.principal:,.0f} ₸ превышает лимит прескоринга "
-                        f"{prescoring.max_limit:,.0f} ₸."
-                    ).replace(",", " "),
-                )
+        self._require_prescoring_outcome(
+            provider,
+            prescoring,
+            principal=request.principal,
+        )
 
         channel = self._required_config_value(provider, "channel")
         hook_url = self._required_config_value(provider, "hook_url")
@@ -289,7 +282,12 @@ class FactoringService(BaseService):
             },
         )
         documents = [
-            self._to_sign_document(item, application_id=application_id) for item in print_forms
+            self._to_sign_document(
+                item,
+                application_id=application_id,
+                include_public_url=False,
+            )
+            for item in print_forms
         ]
         return PrepareFactoringDocumentsResponse(
             id=application_id,
@@ -319,6 +317,8 @@ class FactoringService(BaseService):
         request: SubmitFactoringApplicationRequest,
     ) -> CreateFactoringApplicationResponse:
         application = await self.get_application_by_id(application_id)
+        provider = await self._require_provider()
+        self._require_stored_prescoring(provider, application)
         await self._require_webhook_credentials()
         if application.status not in {"WAITING_SIGN", "NEW"}:
             raise HTTPException(
@@ -354,7 +354,6 @@ class FactoringService(BaseService):
                 ),
             )
 
-        provider = await self._require_provider()
         product_id = application.product_id or self._required_config_value(
             provider, "default_product_id"
         )
@@ -365,11 +364,20 @@ class FactoringService(BaseService):
         hook_url = self._required_config_value(provider, "hook_url")
         success_url = self._required_config_value(provider, "success_url")
         failure_url = self._required_config_value(provider, "failure_url")
+        application = await self.get_application_by_id(application_id)
         bank_print_forms = [
-            {"name": item.name, "url": item.url}
-            for item in documents
-            if item.url
+            {
+                "name": str(form.get("name") or ""),
+                "url": self._print_form_public_url(application_id, form),
+            }
+            for form in self._print_forms_list(application)
+            if form.get("signed")
         ]
+        if not bank_print_forms:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Нет подписанных печатных форм для отправки в банк.",
+            )
         apply_request = CreateFactoringApplicationRequest(
             client_request_id=application.client_request_id,
             iin=iin,
@@ -473,9 +481,16 @@ class FactoringService(BaseService):
             or not compare_digest(stored_token, incoming)
         ):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Print form not found.")
-        cached = self._print_form_cache_path(application_id, name)
-        if cached.exists():
-            return cached.read_bytes()
+        self._require_print_form_link_active(form)
+        return await self._fetch_signed_print_form_pdf(application, form)
+
+    async def download_print_form_authenticated(
+        self,
+        application_id: int,
+        name: str,
+    ) -> bytes:
+        application = await self.get_application_by_id(application_id)
+        form = self._find_print_form(application, name)
         signed, error = await self._print_form_sign_state(
             form,
             self._normalize_iin((application.request_payload or {}).get("iin")),
@@ -485,17 +500,7 @@ class FactoringService(BaseService):
                 status_code=status.HTTP_409_CONFLICT,
                 detail=error or "Документ ещё не подписан.",
             )
-        sign_process_id = str(form.get("sign_process_id") or "")
-        try:
-            pdf = await self._require_mynca().sign_download_pdf(sign_process_id)
-        except MyncaClientError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=exc.detail,
-            ) from exc
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(pdf)
-        return pdf
+        return await self._fetch_signed_print_form_pdf(application, form)
 
     async def get_application_by_id(self, application_id: int) -> FactoringApplicationResponse:
         application = await self.repository.get_application_by_id(application_id)
@@ -506,10 +511,22 @@ class FactoringService(BaseService):
             )
         return application
 
+    async def get_application_for_client(self, application_id: int) -> FactoringApplicationResponse:
+        return self._sanitize_application_for_client(
+            await self.get_application_by_id(application_id)
+        )
+
     async def get_applications_by_client_request(
         self, client_request_id: int
     ) -> list[FactoringApplicationResponse]:
         return await self.repository.get_applications_by_client_request(client_request_id)
+
+    async def get_applications_for_client(
+        self,
+        client_request_id: int,
+    ) -> list[FactoringApplicationResponse]:
+        items = await self.get_applications_by_client_request(client_request_id)
+        return [self._sanitize_application_for_client(item) for item in items]
 
     async def create_refund(
         self,
@@ -625,6 +642,47 @@ class FactoringService(BaseService):
             bank_message=str(bank_response.get("message") or "success"),
         )
 
+    @staticmethod
+    def _refund_webhook_idempotent(
+        application: FactoringApplicationResponse,
+        covlir_status: str,
+    ) -> bool:
+        current = (application.refund_status or "").upper()
+        if covlir_status == "SUCCESS" and current == "SUCCESS":
+            return True
+        if covlir_status == "DECLINE" and current == "DECLINE":
+            return True
+        return False
+
+    @staticmethod
+    def _require_refund_webhook_transition(
+        application: FactoringApplicationResponse,
+        *,
+        covlir_status: str,
+        refund_amount: Decimal | None,
+    ) -> None:
+        current = (application.refund_status or "").upper()
+        if current != "REQUESTED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Refund webhook rejected: application is not in REQUESTED state.",
+            )
+        if covlir_status != "SUCCESS" or refund_amount is None:
+            return
+        principal = application.principal or Decimal("0")
+        if principal <= 0:
+            return
+        already_refunded = application.refund_amount or Decimal("0")
+        new_total = already_refunded + refund_amount
+        if new_total > principal:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Refund amount {new_total:,.0f} ₸ exceeds contract principal "
+                    f"{principal:,.0f} ₸."
+                ).replace(",", " "),
+            )
+
     async def _clear_requested_refund(self, application_id: int) -> None:
         try:
             await self.repository.update_application_refund(
@@ -715,11 +773,20 @@ class FactoringService(BaseService):
             )
             return WebhookAckResponse(ok=True, status=True)
 
+        idempotent = self._refund_webhook_idempotent(application, covlir_status)
+        if idempotent:
+            return WebhookAckResponse(ok=True, status=True)
+
         refund_type = self._extract_string(payload, "refund_type")
         refund_amount_raw = payload.get("refund_amount")
         refund_amount = None
         if refund_amount_raw is not None:
             refund_amount = Decimal(str(refund_amount_raw))
+        self._require_refund_webhook_transition(
+            application,
+            covlir_status=covlir_status,
+            refund_amount=refund_amount,
+        )
         await self.repository.update_application_refund(
             application_id=application.id,
             uuid=uuid,
@@ -1380,11 +1447,13 @@ class FactoringService(BaseService):
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=exc.detail,
             ) from exc
+        expires_at = datetime.now(UTC) + timedelta(seconds=PRINT_FORM_PUBLIC_URL_TTL_SEC)
         return {
             "name": spec["name"],
             "title": spec["title"],
             "url": "",
             "file_token": token_hex(16),
+            "url_expires_at": expires_at.isoformat(),
             "sign_url": sign_url,
             "sign_process_id": sign_process_id,
             "signed": False,
@@ -1404,9 +1473,12 @@ class FactoringService(BaseService):
         *,
         application_id: int,
         signed: bool | None = None,
+        include_public_url: bool = False,
     ) -> FactoringSignDocument:
         is_signed = bool(form.get("signed")) if signed is None else signed
-        url = self._print_form_public_url(application_id, form) if is_signed else None
+        url = None
+        if include_public_url and is_signed:
+            url = self._print_form_public_url(application_id, form)
         return FactoringSignDocument(
             name=str(form.get("name") or ""),
             title=str(form.get("title") or form.get("name") or ""),
@@ -1415,6 +1487,79 @@ class FactoringService(BaseService):
             url=url,
             error=str(form.get("error") or "") or None,
         )
+
+    def _sanitize_application_for_client(
+        self,
+        application: FactoringApplicationResponse,
+    ) -> FactoringApplicationResponse:
+        if not application.print_forms:
+            return application
+        sanitized_forms = [
+            self._sanitize_print_form_for_client(dict(item))
+            for item in application.print_forms
+            if isinstance(item, dict)
+        ]
+        return application.model_copy(update={"print_forms": sanitized_forms})
+
+    @staticmethod
+    def _sanitize_print_form_for_client(form: dict[str, Any]) -> dict[str, Any]:
+        cleaned = dict(form)
+        cleaned.pop("file_token", None)
+        cleaned.pop("url_expires_at", None)
+        if "url" in cleaned:
+            cleaned["url"] = ""
+        return cleaned
+
+    def _require_print_form_link_active(self, form: dict[str, Any]) -> None:
+        expires_raw = form.get("url_expires_at")
+        if not expires_raw:
+            return
+        try:
+            expires_at = datetime.fromisoformat(str(expires_raw).replace("Z", "+00:00"))
+        except ValueError:
+            return
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) > expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Ссылка на печатную форму истекла.",
+            )
+
+    async def _fetch_signed_print_form_pdf(
+        self,
+        application: FactoringApplicationResponse,
+        form: dict[str, Any],
+    ) -> bytes:
+        signed, error = await self._print_form_sign_state(
+            form,
+            self._normalize_iin((application.request_payload or {}).get("iin")),
+        )
+        if not signed:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=error or "Документ ещё не подписан.",
+            )
+
+        name = str(form.get("name") or "")
+        cached = self._print_form_cache_path(application.id, name)
+        if cached.exists():
+            age_sec = datetime.now(UTC).timestamp() - cached.stat().st_mtime
+            if age_sec <= PRINT_FORM_CACHE_TTL_SEC:
+                return cached.read_bytes()
+            cached.unlink(missing_ok=True)
+
+        sign_process_id = str(form.get("sign_process_id") or "")
+        try:
+            pdf = await self._require_mynca().sign_download_pdf(sign_process_id)
+        except MyncaClientError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=exc.detail,
+            ) from exc
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(pdf)
+        return pdf
 
     @staticmethod
     def _print_forms_list(application: FactoringApplicationResponse) -> list[dict[str, Any]]:
@@ -1483,7 +1628,10 @@ class FactoringService(BaseService):
             updated_list.append(form_copy)
             documents.append(
                 self._to_sign_document(
-                    form_copy, application_id=application.id, signed=signed
+                    form_copy,
+                    application_id=application.id,
+                    signed=signed,
+                    include_public_url=False,
                 )
             )
         if changed:
@@ -1555,6 +1703,100 @@ class FactoringService(BaseService):
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return True
+
+    @staticmethod
+    def _prescoring_validity_sec(provider: FactoringProvider) -> int:
+        raw = provider.config.get("prescoring_validity_sec", 3600)
+        try:
+            validity = int(raw)
+        except (TypeError, ValueError):
+            return 3600
+        return max(60, min(validity, 86400))
+
+    def _require_prescoring_outcome(
+        self,
+        provider: FactoringProvider,
+        outcome: _PrescoringOutcome,
+        *,
+        principal: Decimal | None = None,
+    ) -> None:
+        if not self._prescoring_required(provider):
+            if not outcome.skipped and outcome.status == "REJECTED":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=outcome.message or "Клиент не прошёл прескоринг (REJECTED).",
+                )
+            if (
+                not outcome.skipped
+                and outcome.max_limit is not None
+                and principal is not None
+                and principal > outcome.max_limit
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Сумма {principal:,.0f} ₸ превышает лимит прескоринга "
+                        f"{outcome.max_limit:,.0f} ₸."
+                    ).replace(",", " "),
+                )
+            return
+
+        if outcome.skipped:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Prescoring обязателен, но не был выполнен.",
+            )
+        status_value = (outcome.status or "").upper()
+        if status_value != "APPROVED":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=outcome.message or f"Клиент не прошёл прескоринг ({status_value or 'UNKNOWN'}).",
+            )
+        if (
+            outcome.max_limit is not None
+            and principal is not None
+            and principal > outcome.max_limit
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Сумма {principal:,.0f} ₸ превышает лимит прескоринга "
+                    f"{outcome.max_limit:,.0f} ₸."
+                ).replace(",", " "),
+            )
+
+    def _require_stored_prescoring(
+        self,
+        provider: FactoringProvider,
+        application: FactoringApplicationResponse,
+    ) -> None:
+        if not self._prescoring_required(provider):
+            return
+
+        status_value = (application.prescoring_status or "").upper()
+        if status_value != "APPROVED":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    application.prescoring_message
+                    or "Заявка создана без успешного прескоринга (APPROVED)."
+                ),
+            )
+
+        checked_at = application.prescoring_checked_at
+        if checked_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="У заявки нет времени проверки прескоринга. Подготовьте документы заново.",
+            )
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=UTC)
+        age_sec = (datetime.now(UTC) - checked_at).total_seconds()
+        if age_sec > self._prescoring_validity_sec(provider):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Прескоринг устарел. Подготовьте документы заново (prepare).",
+            )
 
     @staticmethod
     def _prescoring_timeout_sec(provider: FactoringProvider) -> float:

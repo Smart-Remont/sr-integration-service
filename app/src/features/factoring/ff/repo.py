@@ -361,7 +361,7 @@ class FactoringRepository(BaseRepository):
         installment/ff/repo.py). Several hunters can work the same deal in
         parallel — their combined principal must not exceed the deal amount."""
         row = await self.fetchrow(
-            "SELECT public.cr_deal_committed_amount($1, $2) AS committed",
+            "SELECT public.cr_deal_committed_amount($1::bigint, $2::bigint) AS committed",
             client_request_id,
             exclude_application_id,
         )
