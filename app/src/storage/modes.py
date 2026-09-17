@@ -45,6 +45,12 @@ class FileStoreMode(StrEnum):
     CLIENT_REQUEST_DOC = "CLIENT_REQUEST_DOC"
     LAYER = "LAYER"
     DESIGN_ROOM = "DESIGN_ROOM"
+    CHECK_LIST = "CHECK_LIST"
+    REMONT_CHECK = "REMONT_CHECK"
+    PM_CHECK = "PM_CHECK"
+    CLIENT_REQUEST_CHECK = "CLIENT_REQUEST_CHECK"
+    RESIDENT_CHECK_DRAFT = "RESIDENT_CHECK_DRAFT"
+    CLIENT_REQUEST_DRAFT = "CLIENT_REQUEST_DRAFT"
 
 
 FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
@@ -83,6 +89,12 @@ FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
     FileStoreMode.CLIENT_REQUEST_DOC: "Документ заявки (дефекты)",
     FileStoreMode.LAYER: "Слой пресета (constructor)",
     FileStoreMode.DESIGN_ROOM: "Базовое фото комнаты (design_room)",
+    FileStoreMode.CHECK_LIST: "Файлы пункта чек-листа ОКК (фото/аудио)",
+    FileStoreMode.REMONT_CHECK: "Дефекты проверки ремонта (фото/видео/аудио)",
+    FileStoreMode.PM_CHECK: "Файлы проверки менеджера",
+    FileStoreMode.CLIENT_REQUEST_CHECK: "Черновая проверка заявки (фото/видео)",
+    FileStoreMode.RESIDENT_CHECK_DRAFT: "Черновая приёмка ЖК",
+    FileStoreMode.CLIENT_REQUEST_DRAFT: "Файлы черновой проверки заявки",
 }
 
 # Same folders/prefixes as KanbanController::srfileUploadAction.
@@ -123,6 +135,12 @@ MODE_PATH_TEMPLATES: dict[FileStoreMode, str] = {
     FileStoreMode.CLIENT_REQUEST_DOC: "/documents/{date}/client_request_docs/client_request_doc_{n}_{uniq}.{ext}",
     FileStoreMode.LAYER: "/documents/{date}/layer/layer_{uniq}.{ext}",
     FileStoreMode.DESIGN_ROOM: "/documents/{date}/design_room/design_room_{uniq}.{ext}",
+    FileStoreMode.CHECK_LIST: "/documents/{date}/check_list/check_list_{n}_{uniq}.{ext}",
+    FileStoreMode.REMONT_CHECK: "/documents/{date}/remont_check/remont_check_{n}_{uniq}.{ext}",
+    FileStoreMode.PM_CHECK: "/documents/{date}/pm_check_files/pm_check_file_{n}_{uniq}.{ext}",
+    FileStoreMode.CLIENT_REQUEST_CHECK: "/documents/{date}/client_request_check/client_request_check_{n}_{uniq}.{ext}",
+    FileStoreMode.RESIDENT_CHECK_DRAFT: "/documents/{date}/resident_check_draft/resident_check_draft_{n}_{uniq}.{ext}",
+    FileStoreMode.CLIENT_REQUEST_DRAFT: "/documents/{date}/client_request_draft/client_request_draft_{n}_{uniq}.{ext}",
 }
 
 
