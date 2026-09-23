@@ -1948,7 +1948,7 @@ class FactoringService(BaseService):
         if prescoring_phone is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Invalid mobile_phone for prescoring: expected 10 digits without +7.",
+                detail="Invalid mobile_phone for prescoring: expected 11 digits starting with 7.",
             )
 
         base_url = str(provider.config.get("prescoring_base_url", "")).strip().rstrip("/")

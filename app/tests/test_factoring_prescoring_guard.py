@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from src.features.factoring.ff.limits import phone_for_prescoring
 from src.features.factoring.ff.repo import FactoringProvider
 from src.features.factoring.ff.service import FactoringService, _PrescoringOutcome
 from src.features.factoring.schemas import FactoringApplicationResponse
@@ -222,3 +223,9 @@ def test_stored_prescoring_required_allows_fresh_approved():
     )
 
     svc._require_stored_prescoring(_provider(required=True), application)
+
+
+def test_phone_for_prescoring_keeps_leading_seven():
+    assert phone_for_prescoring("+77057238447") == "77057238447"
+    assert phone_for_prescoring("7057238447") == "77057238447"
+    assert phone_for_prescoring("87057238447") == "77057238447"

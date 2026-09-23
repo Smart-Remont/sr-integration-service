@@ -27,13 +27,13 @@ def parse_principal_limits(config: dict[str, Any]) -> tuple[Decimal, Decimal]:
 
 
 def phone_for_prescoring(normalized_phone: str) -> str | None:
-    """Bank prescoring expects 10 digits without country code (7XXXXXXXXX)."""
+    """Bank prescoring expects 11 characters: 7 plus 10 digits (77057238447)."""
     digits = "".join(symbol for symbol in normalized_phone if symbol.isdigit())
     if digits.startswith("8") and len(digits) == 11:
         digits = "7" + digits[1:]
-    if len(digits) == 11 and digits.startswith("7"):
-        return digits[1:]
     if len(digits) == 10:
+        digits = f"7{digits}"
+    if len(digits) == 11 and digits.startswith("7"):
         return digits
     return None
 
