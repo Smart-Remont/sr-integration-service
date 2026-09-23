@@ -1905,12 +1905,17 @@ class FactoringService(BaseService):
                 skipped=True,
             )
         allowed = outcome.status == "APPROVED"
+        message = outcome.message
         if allowed and outcome.max_limit is not None and principal > outcome.max_limit:
             allowed = False
+            message = (
+                f"Сумма {principal:,.0f} ₸ превышает лимит прескоринга "
+                f"{outcome.max_limit:,.0f} ₸. Уменьшите сумму займа."
+            ).replace(",", " ")
         return PrescoringFactoringResponse(
             status=outcome.status,
             score=outcome.score,
-            message=outcome.message,
+            message=message,
             max_limit=outcome.max_limit,
             allowed=allowed,
             skipped=False,
