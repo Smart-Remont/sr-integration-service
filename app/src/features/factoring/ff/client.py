@@ -234,30 +234,23 @@ class FactoringClient:
                 )
             return payload
 
-        detail: str
-        if isinstance(payload, dict):
-            description = payload.get("description")
-            message = payload.get("message") or payload.get("detail")
-            if isinstance(description, str) and description.strip():
-                detail = description.strip()
-            elif isinstance(message, str) and message.strip() and message.strip().lower() != "error":
-                detail = message.strip()
+        raw_body = FactoringClient._truncate_response_body(response).strip()
+        lowered = raw_body.lower()
+        if "cloudflare" in lowered or "you have been blocked" in lowered:
+            if resolve_ip:
+                detail = (
+                    f"Freedom Factoring blocked the request (HTTP {response.status_code}, Cloudflare) "
+                    f"despite resolve_ip={resolve_ip}."
+                )
             else:
-                detail = "Freedom Factoring request failed."
+                detail = (
+                    f"Freedom Factoring blocked the request (HTTP {response.status_code}, Cloudflare). "
+                    "Set config.resolve_ip on provider FF_FACTORING."
+                )
+        elif raw_body:
+            detail = f"HTTP {response.status_code}: {raw_body}"
         else:
-            detail = f"Freedom Factoring request failed with status {response.status_code}."
-            raw_body = FactoringClient._truncate_response_body(response)
-            if "cloudflare" in raw_body.lower() or "you have been blocked" in raw_body.lower():
-                if resolve_ip:
-                    detail = (
-                        f"Freedom Factoring blocked the request (HTTP {response.status_code}, Cloudflare) "
-                        f"despite resolve_ip={resolve_ip}."
-                    )
-                else:
-                    detail = (
-                        f"Freedom Factoring blocked the request (HTTP {response.status_code}, Cloudflare). "
-                        "Set config.resolve_ip on provider FF_FACTORING."
-                    )
+            detail = f"HTTP {response.status_code}"
 
         raise FactoringClientError(status_code=response.status_code, detail=detail)
 
