@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from loguru import logger
 from src.integration_context.constants import SCOPE_FACTORING
 from src.integration_context.deps import IntegrationContextDep
 from src.integration_context.helpers import employee_id_from_context
@@ -176,11 +177,36 @@ async def download_print_form(
 
 @router.post(
     "/sign-callback",
-    response_model=WebhookAckResponse,
-    summary="Callback MyNCA после подписи (no-op, статус проверяем poll)",
+    summary="Callback MyNCA после подписи печатной формы",
+    description=(
+        "Вызывает **MyNCA** (`back_url`). **Auth:** нет.\n\n"
+        "`status=SUCCESS`: ИИН из `dn_name` сверяется с ИИН заявки. "
+        "Несовпадение — `{\"status\": false, \"error\": ...}`, MyNCA откатывает подпись. "
+        "Совпадение и прочие статусы — `{\"status\": true, \"error\": null}`."
+    ),
 )
-async def sign_callback() -> WebhookAckResponse:
-    return WebhookAckResponse(ok=True, status=True)
+async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(
+            {"status": False, "error": "Невалидный JSON в callback"},
+            status_code=400,
+        )
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": False, "error": "Невалидный JSON в callback"},
+            status_code=400,
+        )
+    try:
+        payload = await service.handle_sign_callback(body)
+    except Exception:  # noqa: BLE001
+        logger.exception("factoring sign-callback failed")
+        return JSONResponse(
+            {"status": False, "error": "Не удалось проверить ИИН подписанта"},
+            status_code=500,
+        )
+    return JSONResponse(payload)
 
 
 @router.post(
