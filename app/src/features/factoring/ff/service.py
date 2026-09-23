@@ -180,8 +180,19 @@ class FactoringService(BaseService):
         partner = await self._require_partner_for_client_request(
             provider, request.client_request_id
         )
-        # Prescoring is optional for now: prepare goes straight to print forms.
-        # Re-enable _run_prescoring + _require_prescoring_outcome when ML is reachable.
+        prescoring = await self._run_prescoring(
+            provider=provider,
+            client_request_id=request.client_request_id,
+            iin=iin,
+            phone=phone,
+            partner=partner,
+            principal=request.principal,
+        )
+        self._require_prescoring_outcome(
+            provider,
+            prescoring,
+            principal=request.principal,
+        )
 
         channel = self._required_config_value(provider, "channel")
         hook_url = self._required_config_value(provider, "hook_url")
@@ -249,6 +260,11 @@ class FactoringService(BaseService):
             failure_url=failure_url,
             hook_url=hook_url,
             status="WAITING_SIGN",
+            prescoring_status=prescoring.status,
+            prescoring_score=Decimal(str(prescoring.score)) if prescoring.score is not None else None,
+            prescoring_message=prescoring.message,
+            prescoring_max_limit=prescoring.max_limit,
+            prescoring_checked_at=prescoring.checked_at,
         )
         await self._log_event(
             "DOCUMENTS_PREPARED",
@@ -352,6 +368,7 @@ class FactoringService(BaseService):
     ) -> CreateFactoringApplicationResponse:
         application = await self.get_application_by_id(application_id)
         provider = await self._require_provider()
+        self._require_stored_prescoring(provider, application)
         await self._require_webhook_credentials()
         if application.status not in {"WAITING_SIGN", "NEW"}:
             raise HTTPException(
