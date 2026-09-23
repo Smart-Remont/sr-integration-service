@@ -1689,11 +1689,44 @@ class FactoringService(BaseService):
                 ).replace(",", " "),
             )
 
-    def _is_prescoring_configured(self, provider: FactoringProvider) -> bool:
+    def _prescoring_auth(
+        self,
+        provider: FactoringProvider,
+        partner: str | None,
+    ) -> tuple[str, str] | None:
+        """Partner entry in config.prescoring_credentials wins; env is the fallback."""
+        creds = provider.config.get("prescoring_credentials")
+        if isinstance(creds, dict) and partner:
+            entry = creds.get(partner)
+            if isinstance(entry, dict):
+                username = str(entry.get("user") or entry.get("username") or "").strip()
+                password = str(entry.get("password") or "")
+                if username and password:
+                    return username, password
+        if self.prescoring_username and self.prescoring_password:
+            return self.prescoring_username, self.prescoring_password
+        return None
+
+    def _is_prescoring_configured(
+        self,
+        provider: FactoringProvider,
+        partner: str | None = None,
+    ) -> bool:
         base_url = provider.config.get("prescoring_base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             return False
-        return bool(self.prescoring_username and self.prescoring_password)
+        if partner:
+            return self._prescoring_auth(provider, partner) is not None
+        if self._prescoring_auth(provider, None) is not None:
+            return True
+        creds = provider.config.get("prescoring_credentials")
+        if not isinstance(creds, dict):
+            return False
+        return any(
+            self._prescoring_auth(provider, key) is not None
+            for key in creds
+            if isinstance(key, str)
+        )
 
     @staticmethod
     def _prescoring_required(provider: FactoringProvider) -> bool:
@@ -1843,13 +1876,15 @@ class FactoringService(BaseService):
         partner: str,
         principal: Decimal,
     ) -> _PrescoringOutcome:
-        if not self._is_prescoring_configured(provider):
+        auth = self._prescoring_auth(provider, partner)
+        if not self._is_prescoring_configured(provider, partner) or auth is None:
             if self._prescoring_required(provider):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=(
                         "Prescoring не настроен: задайте config.prescoring_base_url и "
-                        "FACTORING_PRESCORING_USER/PASSWORD."
+                        f"prescoring_credentials для {partner} "
+                        "(или FACTORING_PRESCORING_USER/PASSWORD)."
                     ),
                 )
             await self._log_event(
@@ -1891,11 +1926,12 @@ class FactoringService(BaseService):
             },
         )
         try:
+            username, password = auth
             response_payload = await self.client.prescoring(
                 base_url=base_url,
                 path=path,
-                username=self.prescoring_username,
-                password=self.prescoring_password,
+                username=username,
+                password=password,
                 payload=payload,
                 timeout_sec=self._prescoring_timeout_sec(provider),
             )

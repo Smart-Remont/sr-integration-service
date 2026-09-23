@@ -110,7 +110,8 @@ async def prepare_documents(
     summary="Прескоринг клиента перед факторингом (Freedom ML)",
     description=(
         "Вызывает bank `prescoring_factoring` до prepare/submit. "
-        "Требует `config.prescoring_base_url` и env `FACTORING_PRESCORING_USER/PASSWORD`. "
+        "Требует `config.prescoring_base_url` и креды партнёра в "
+        "`config.prescoring_credentials` (fallback: env `FACTORING_PRESCORING_*`). "
         "При `prescoring_required=false` недоступность сервиса не блокирует (dev)."
     ),
 )
