@@ -312,6 +312,33 @@ class FactoringRepository(BaseRepository):
             return None
         return self._row_to_application(dict(rows[0]))
 
+    async def get_application_by_sign_process_id(
+        self, sign_process_id: str
+    ) -> FactoringApplicationResponse | None:
+        row = await self.fetchrow(
+            """
+            SELECT id
+            FROM installment_application_tab
+            WHERE product_type = 'FACTORING'
+              AND EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(
+                      CASE
+                          WHEN jsonb_typeof(print_forms) = 'array' THEN print_forms
+                          ELSE '[]'::jsonb
+                      END
+                  ) AS form
+                  WHERE form->>'sign_process_id' = $1
+              )
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            sign_process_id,
+        )
+        if row is None:
+            return None
+        return await self.get_application_by_id(int(row["id"]))
+
     async def get_applications_by_client_request(
         self, client_request_id: int
     ) -> list[FactoringApplicationResponse]:

@@ -180,19 +180,8 @@ class FactoringService(BaseService):
         partner = await self._require_partner_for_client_request(
             provider, request.client_request_id
         )
-        prescoring = await self._run_prescoring(
-            provider=provider,
-            client_request_id=request.client_request_id,
-            iin=iin,
-            phone=phone,
-            partner=partner,
-            principal=request.principal,
-        )
-        self._require_prescoring_outcome(
-            provider,
-            prescoring,
-            principal=request.principal,
-        )
+        # Prescoring is optional for now: prepare goes straight to print forms.
+        # Re-enable _run_prescoring + _require_prescoring_outcome when ML is reachable.
 
         channel = self._required_config_value(provider, "channel")
         hook_url = self._required_config_value(provider, "hook_url")
@@ -260,11 +249,6 @@ class FactoringService(BaseService):
             failure_url=failure_url,
             hook_url=hook_url,
             status="WAITING_SIGN",
-            prescoring_status=prescoring.status,
-            prescoring_score=Decimal(str(prescoring.score)) if prescoring.score is not None else None,
-            prescoring_message=prescoring.message,
-            prescoring_max_limit=prescoring.max_limit,
-            prescoring_checked_at=prescoring.checked_at,
         )
         await self._log_event(
             "DOCUMENTS_PREPARED",
@@ -297,6 +281,56 @@ class FactoringService(BaseService):
             documents=documents,
         )
 
+    async def handle_sign_callback(self, data: dict[str, Any]) -> dict[str, Any]:
+        """MyNCA back_url. Несовпадение ИИН → {"status": false, "error": ...} (откат подписи)."""
+        sign_process_id = str(data.get("sign_process_id") or "").strip()
+        if not sign_process_id:
+            return {"status": True, "error": None}
+
+        callback_status = str(data.get("status") or "").strip().upper()
+        if callback_status != "SUCCESS":
+            return {"status": True, "error": None}
+
+        application = await self.repository.get_application_by_sign_process_id(sign_process_id)
+        if application is None:
+            logger.warning(
+                "factoring sign-callback: application not found | sign_process_id={id}",
+                id=sign_process_id,
+            )
+            return {"status": True, "error": None}
+
+        error = self._sign_callback_iin_error(application, data)
+        if error:
+            logger.warning(
+                "factoring sign-callback rejected | sign_process_id={id} application_id={app} error={error}",
+                id=sign_process_id,
+                app=application.id,
+                error=error,
+            )
+            return {"status": False, "error": error}
+        return {"status": True, "error": None}
+
+    @staticmethod
+    def _sign_callback_iin_error(
+        application: FactoringApplicationResponse,
+        data: dict[str, Any],
+    ) -> str | None:
+        expected_iin = FactoringService._normalize_iin(
+            (application.request_payload or {}).get("iin")
+        )
+        dn_name = data.get("dn_name")
+        if not isinstance(dn_name, str) or not dn_name.strip():
+            return "Данные подписавшего не были получены"
+        if not expected_iin:
+            return "ИИН заявки не заполнен"
+        cert_iin = FactoringService._extract_iin_from_dn(dn_name)
+        if cert_iin == expected_iin:
+            return None
+        return (
+            f"ИИН подписанта не соответствует заявке "
+            f"(ожидается {expected_iin}, DN: {dn_name})"
+        )
+
     async def refresh_sign_status(
         self,
         application_id: int,
@@ -318,7 +352,6 @@ class FactoringService(BaseService):
     ) -> CreateFactoringApplicationResponse:
         application = await self.get_application_by_id(application_id)
         provider = await self._require_provider()
-        self._require_stored_prescoring(provider, application)
         await self._require_webhook_credentials()
         if application.status not in {"WAITING_SIGN", "NEW"}:
             raise HTTPException(
@@ -2053,7 +2086,20 @@ class FactoringService(BaseService):
         return normalized
 
     @staticmethod
+    def _extract_iin_from_dn(dn_name: str | None) -> str | None:
+        """ИИН из DN, как `_extract_bin_iin_from_dn` в specification_views.py."""
+        if not isinstance(dn_name, str) or not dn_name.strip():
+            return None
+        match = re.search(r"IIN\s*=?\s*(\d{12})", dn_name, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    @staticmethod
     def _extract_signer_iin(payload: dict[str, Any]) -> str | None:
+        for key in ("dn_name", "dn"):
+            raw = payload.get(key)
+            iin = FactoringService._extract_iin_from_dn(raw if isinstance(raw, str) else None)
+            if iin:
+                return iin
         signer = payload.get("signer") or {}
         if not isinstance(signer, dict):
             signer = {}
@@ -2063,20 +2109,14 @@ class FactoringService(BaseService):
         top_subject = payload.get("subject") or {}
         if not isinstance(top_subject, dict):
             top_subject = {}
-        candidates: list[Any] = [
-            payload.get("dn_name"),
-            payload.get("dn"),
+        for raw in (
             subject.get("iin"),
             signer.get("iin"),
             payload.get("iin"),
             top_subject.get("iin"),
-        ]
-        for raw in candidates:
+        ):
             if not isinstance(raw, str) or not raw.strip():
                 continue
-            match = re.search(r"(?:SERIALNUMBER=IIN|IIN=)?(\d{12})", raw.replace(" ", ""), re.I)
-            if match:
-                return match.group(1)
             digits = "".join(ch for ch in raw if ch.isdigit())
             if len(digits) == 12:
                 return digits
