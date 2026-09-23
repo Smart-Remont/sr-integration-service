@@ -138,6 +138,75 @@ def test_stored_prescoring_required_blocks_stale_check():
     assert "устарел" in exc.value.detail.lower()
 
 
+def test_prescoring_auth_uses_partner_credentials_from_config():
+    provider = FactoringProvider(
+        id=2,
+        code="FF_FACTORING",
+        base_url="https://example.test/",
+        config={
+            "prescoring_base_url": "http://10.48.66.1:8081",
+            "prescoring_credentials": {
+                "FACTORING_AZ": {"user": "smart_remont_azure", "password": "az-secret"},
+                "FACTORING_NO": {"user": "smart_remont_north", "password": "no-secret"},
+            },
+        },
+    )
+    svc = FactoringService(
+        repository=MagicMock(),
+        client=MagicMock(),
+        app_env="test",
+        prescoring_username="env-user",
+        prescoring_password="env-secret",
+    )
+
+    assert svc._prescoring_auth(provider, "FACTORING_AZ") == (
+        "smart_remont_azure",
+        "az-secret",
+    )
+    assert svc._is_prescoring_configured(provider, "FACTORING_NO") is True
+
+
+def test_prescoring_auth_falls_back_to_env_when_partner_missing():
+    provider = FactoringProvider(
+        id=2,
+        code="FF_FACTORING",
+        base_url="https://example.test/",
+        config={
+            "prescoring_base_url": "http://10.48.66.1:8081",
+            "prescoring_credentials": {
+                "FACTORING_AZ": {"user": "smart_remont_azure", "password": "az-secret"},
+            },
+        },
+    )
+    svc = FactoringService(
+        repository=MagicMock(),
+        client=MagicMock(),
+        app_env="test",
+        prescoring_username="env-user",
+        prescoring_password="env-secret",
+    )
+
+    assert svc._prescoring_auth(provider, "FACTORING_SO") == ("env-user", "env-secret")
+
+
+def test_prescoring_enabled_when_only_config_credentials_exist():
+    provider = FactoringProvider(
+        id=2,
+        code="FF_FACTORING",
+        base_url="https://example.test/",
+        config={
+            "prescoring_base_url": "http://10.48.66.1:8081",
+            "prescoring_credentials": {
+                "FACTORING_VI": {"user": "smart_remont_viva", "password": "vi-secret"},
+            },
+        },
+    )
+    svc = _service()
+
+    assert svc._is_prescoring_configured(provider) is True
+    assert svc._prescoring_auth(provider, "FACTORING_AZ") is None
+
+
 def test_stored_prescoring_required_allows_fresh_approved():
     svc = _service()
     application = FactoringApplicationResponse(
