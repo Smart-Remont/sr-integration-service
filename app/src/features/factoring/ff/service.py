@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from bcrypt import checkpw
 from fastapi import HTTPException, status
 from loguru import logger
+from src.exceptions import StoredProcedureError
 from src.service import BaseService
 
 from ..schemas import (
@@ -790,7 +791,67 @@ class FactoringService(BaseService):
             source="FF_FACTORING",
             payload={"status": status_value, "raw": payload},
         )
+        if status_value == "ISSUED":
+            await self._try_auto_apply_on_issued(application.id)
         return WebhookAckResponse(ok=True, status=True)
+
+    async def _try_auto_apply_on_issued(self, application_id: int) -> None:
+        """Mirror of installment's auto-apply: on ISSUED, create a
+        client_request_credit_detail_tab row so the deal reflects the payout
+        without a manual step. Never raises — a failure here must not turn
+        the bank's webhook ack into an error (the bank would retry)."""
+        application = await self.repository.get_application_by_id(application_id)
+        if application is None:
+            return
+        if application.status != "ISSUED":
+            return
+        if application.client_request_credit_detail_id is not None:
+            return
+        if application.created_by is None:
+            logger.warning(
+                "Factoring auto-apply skipped | application_id={id} reason=created_by missing",
+                id=application_id,
+            )
+            await self._log_event(
+                "AUTO_APPLY_FAILED",
+                factoring_id=application_id,
+                source="FF_FACTORING",
+                payload={"error": "created_by is missing on application"},
+            )
+            return
+
+        await self._log_event(
+            "AUTO_APPLY_STARTED",
+            factoring_id=application_id,
+            source="FF_FACTORING",
+            payload={"created_by": application.created_by},
+        )
+        try:
+            credit_detail_id = await self.repository.apply_application_to_deal(
+                application_id=application_id,
+                created_by=application.created_by,
+            )
+        except Exception as exc:  # noqa: BLE001
+            detail = exc.message if isinstance(exc, StoredProcedureError) else str(exc)
+            logger.warning(
+                "Factoring auto-apply failed | application_id={id} error={error}",
+                id=application_id,
+                error=detail,
+            )
+            await self._log_event(
+                "AUTO_APPLY_FAILED",
+                factoring_id=application_id,
+                source="FF_FACTORING",
+                payload={"error": detail},
+            )
+            return
+
+        await self._log_event(
+            "AUTO_APPLY",
+            factoring_id=application_id,
+            source="FF_FACTORING",
+            payload={"client_request_credit_detail_id": credit_detail_id},
+        )
 
     async def handle_refund_webhook(
         self,

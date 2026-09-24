@@ -694,6 +694,31 @@ class FactoringRepository(BaseRepository):
             raise RuntimeError("Failed to update factoring refund.")
         return int(scalar_result)
 
+    async def apply_application_to_deal(
+        self,
+        *,
+        application_id: int,
+        created_by: int,
+    ) -> int:
+        """Create client_request_credit_detail_tab row for an ISSUED application
+        and link it back (shared with installment — see
+        public.cr_credit_detail__insert_from_installment)."""
+        payload = {
+            "application_id": application_id,
+            "created_by": created_by,
+        }
+        scalar_result = scalar_from_sp_rows(
+            await self.call_sp(
+                "public.cr_credit_detail__insert_from_installment",
+                json.dumps(payload),
+                session_user_id=created_by,
+                module_code="MYSPACE",
+            )
+        )
+        if scalar_result is None:
+            raise RuntimeError("Failed to apply factoring application to deal.")
+        return int(scalar_result)
+
     async def update_print_forms(
         self,
         application_id: int,
