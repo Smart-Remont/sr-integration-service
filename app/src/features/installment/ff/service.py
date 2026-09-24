@@ -13,6 +13,7 @@ from loguru import logger
 from src.exceptions import StoredProcedureError
 from src.service import BaseService
 
+from ..deal_guard import check_deal_client_request_state
 from ..schemas import (
     AllowedBankListResponse,
     AllowedBankResponse,
@@ -121,11 +122,7 @@ class FFService(BaseService):
 
         provider = await self._require_provider()
         await self._require_webhook_credentials()
-        if not await self.ff_repository.client_request_exists(request.client_request_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"client_request_id={request.client_request_id} was not found.",
-            )
+        await self._require_deal_main_client_request(request.client_request_id)
 
         iin = self._normalize_iin(request.iin)
         phone = self._normalize_phone(request.mobile_phone)
@@ -275,11 +272,7 @@ class FFService(BaseService):
     async def get_allowed_banks_for_client_request(
         self, client_request_id: int
     ) -> AllowedBankListResponse:
-        if not await self.ff_repository.client_request_exists(client_request_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"client_request_id={client_request_id} was not found.",
-            )
+        await self._require_deal_main_client_request(client_request_id)
         rows = await self.ff_repository.get_allowed_banks_for_client_request(client_request_id)
         items = [AllowedBankResponse.model_validate(row) for row in rows]
         await self._log_event(
@@ -684,6 +677,10 @@ class FFService(BaseService):
             expires_at=expires_at,
         )
         return access_token
+
+    async def _require_deal_main_client_request(self, client_request_id: int) -> None:
+        state = await self.ff_repository.get_deal_client_request_state(client_request_id)
+        check_deal_client_request_state(state, client_request_id)
 
     async def _require_deal_budget(
         self,
