@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.features.big_integration.db import scalar_from_sp_rows
+from src.features.installment.deal_guard import fetch_deal_client_request_state
 from src.repository import BaseRepository
 
 from ..schemas import FactoringApplicationResponse
@@ -350,19 +351,8 @@ class FactoringRepository(BaseRepository):
         )
         return [self._row_to_application(dict(row)) for row in rows]
 
-    async def get_client_request_contacts(
-        self, client_request_id: int
-    ) -> dict[str, Any] | None:
-        rows = await self.call_sp(
-            "public.factoring__client_request_get_for_apply",
-            client_request_id,
-            cursor=True,
-            module_code="MYSPACE",
-        )
-        return dict(rows[0]) if rows else None
-
-    async def client_request_exists(self, client_request_id: int) -> bool:
-        return await self.get_client_request_contacts(client_request_id) is not None
+    async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
+        return await fetch_deal_client_request_state(self, client_request_id)
 
     async def get_deal_total_amount(self, client_request_id: int) -> Decimal | None:
         row = await self.fetchrow(

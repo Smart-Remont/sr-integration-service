@@ -7,6 +7,7 @@ from typing import Any
 from src.features.big_integration.db import scalar_from_sp_rows
 from src.repository import BaseRepository
 
+from ..deal_guard import fetch_deal_client_request_state
 from ..schemas import InstallmentApplicationResponse
 
 
@@ -290,14 +291,8 @@ class FFRepository(BaseRepository):
         )
         return Decimal(str(row["committed"])) if row is not None else Decimal("0")
 
-    async def client_request_exists(self, client_request_id: int) -> bool:
-        rows = await self.call_sp(
-            "public.installment__client_request_get_for_apply",
-            client_request_id,
-            cursor=True,
-            module_code="MYSPACE",
-        )
-        return bool(rows)
+    async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
+        return await fetch_deal_client_request_state(self, client_request_id)
 
     async def get_provider_webhook_credentials(self, code: str = "FF") -> FFWebhookCredential | None:
         rows = await self.call_sp(

@@ -15,6 +15,7 @@ from bcrypt import checkpw
 from fastapi import HTTPException, status
 from loguru import logger
 from src.exceptions import StoredProcedureError
+from src.features.installment.deal_guard import check_deal_client_request_state
 from src.service import BaseService
 
 from ..schemas import (
@@ -116,11 +117,7 @@ class FactoringService(BaseService):
         request: PrescoringFactoringRequest,
     ) -> PrescoringFactoringResponse:
         provider = await self._require_provider()
-        if not await self.repository.client_request_exists(request.client_request_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"client_request_id={request.client_request_id} was not found.",
-            )
+        await self._require_deal_main_client_request(request.client_request_id)
         iin = self._normalize_iin(request.iin)
         phone = self._normalize_phone(request.mobile_phone)
         if iin is None:
@@ -154,11 +151,7 @@ class FactoringService(BaseService):
         self._require_mynca().require_configured()
         provider = await self._require_provider()
         await self._require_webhook_credentials()
-        if not await self.repository.client_request_exists(request.client_request_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"client_request_id={request.client_request_id} was not found.",
-            )
+        await self._require_deal_main_client_request(request.client_request_id)
 
         iin = self._normalize_iin(request.iin)
         phone = self._normalize_phone(request.mobile_phone)
@@ -2097,6 +2090,10 @@ class FactoringService(BaseService):
             },
         )
         return outcome
+
+    async def _require_deal_main_client_request(self, client_request_id: int) -> None:
+        state = await self.repository.get_deal_client_request_state(client_request_id)
+        check_deal_client_request_state(state, client_request_id)
 
     async def _require_deal_budget(
         self,
