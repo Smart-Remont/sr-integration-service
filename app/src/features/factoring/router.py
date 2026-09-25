@@ -182,7 +182,7 @@ async def download_print_form(
         "Вызывает **MyNCA** (`back_url`). **Auth:** нет.\n\n"
         "Одиночная подпись: `status=SUCCESS`, ИИН из `dn_name` сверяется с ИИН заявки. "
         "Несовпадение — `{\"status\": false, \"error\": ...}`, MyNCA откатывает подпись.\n\n"
-        "Batch (`POST /sign/batch`, `atomic: true`): в теле `documents[]`. "
+        "Batch (`POST /sign/batch/create`, `atomic: true`): в теле `documents[]`. "
         "Ответ — `{\"status\": \"success\", \"documents\": [{\"sign_process_id\", \"status\": \"ok\"|\"error\"}]}`. "
         "Ошибочный документ откатывает весь пакет."
     ),
