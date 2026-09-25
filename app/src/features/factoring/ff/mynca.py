@@ -98,7 +98,7 @@ class MyncaClient:
         exp_minutes: int = 60,
         atomic: bool = True,
     ) -> tuple[str, list[dict[str, str | None]]]:
-        """POST /sign/batch — one client signature for several PDFs.
+        """POST /sign/batch/create — one client signature for several PDFs.
 
         ``atomic`` rolls every document back when the back_url rejects any of them.
         """
@@ -120,7 +120,7 @@ class MyncaClient:
             "atomic": atomic,
             "sign_doc_method": "cms",
         }
-        body = await self._request_json("POST", "/sign/batch", json=payload)
+        body = await self._request_json("POST", "/sign/batch/create", json=payload)
         return parse_sign_batch_response(body)
 
     async def sign_status(self, sign_process_id: str) -> dict[str, Any]:
