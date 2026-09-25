@@ -219,15 +219,10 @@ class FactoringService(BaseService):
             credit_contract=credit_contract,
             client_request_id=request.client_request_id,
         )
-        print_forms: list[dict[str, Any]] = []
-        for spec in PRINT_FORM_SPECS:
-            print_forms.append(
-                await self._prepare_one_print_form(
-                    spec=spec,
-                    placeholders=placeholders,
-                    client_request_id=request.client_request_id,
-                )
-            )
+        print_forms = await self._prepare_print_forms(
+            placeholders=placeholders,
+            client_request_id=request.client_request_id,
+        )
 
         credit_goods = (
             [item.model_dump(mode="json", exclude_none=True) for item in request.credit_goods]
@@ -292,7 +287,16 @@ class FactoringService(BaseService):
         )
 
     async def handle_sign_callback(self, data: dict[str, Any]) -> dict[str, Any]:
-        """MyNCA back_url. Несовпадение ИИН → {"status": false, "error": ...} (откат подписи)."""
+        """MyNCA back_url. Несовпадение ИИН → откат подписи.
+
+        Одиночный /sign/create отвечает ``{status: bool, error}``.
+        Batch отвечает списком documents: ошибочный пункт откатывает весь пакет,
+        потому что prepare создаёт его с ``atomic: true``.
+        """
+        documents = data.get("documents")
+        if isinstance(documents, list) and documents:
+            return await self._handle_batch_sign_callback(data, documents)
+
         sign_process_id = str(data.get("sign_process_id") or "").strip()
         if not sign_process_id:
             return {"status": True, "error": None}
@@ -309,6 +313,7 @@ class FactoringService(BaseService):
             )
             return {"status": True, "error": None}
 
+        # Проверка ИИН
         error = self._sign_callback_iin_error(application, data)
         if error:
             logger.warning(
@@ -340,6 +345,74 @@ class FactoringService(BaseService):
             f"ИИН подписанта не соответствует заявке "
             f"(ожидается {expected_iin}, DN: {dn_name})"
         )
+
+    async def _handle_batch_sign_callback(
+        self,
+        data: dict[str, Any],
+        documents: list[Any],
+    ) -> dict[str, Any]:
+        top_status = str(data.get("status") or "").strip().lower()
+        signed = top_status in {"success", "signed", "ok"}
+        results: list[dict[str, str]] = []
+        for item in documents:
+            if not isinstance(item, dict):
+                continue
+            sign_process_id = str(item.get("sign_process_id") or "").strip()
+            if not sign_process_id:
+                continue
+            if not signed:
+                results.append({"sign_process_id": sign_process_id, "status": "ok"})
+                continue
+            application = await self.repository.get_application_by_sign_process_id(sign_process_id)
+            if application is None:
+                logger.warning(
+                    "factoring batch sign-callback: application not found | sign_process_id={id}",
+                    id=sign_process_id,
+                )
+                results.append(
+                    {
+                        "sign_process_id": sign_process_id,
+                        "status": "error",
+                        "error": "Заявка не найдена",
+                    }
+                )
+                continue
+            payload = dict(data)
+            payload.update(item)
+            dn_name = self._callback_dn_name(data, item)
+            if dn_name:
+                payload["dn_name"] = dn_name
+            # Проверка ИИН
+            error = self._sign_callback_iin_error(application, payload)
+            if error:
+                logger.warning(
+                    "factoring batch sign-callback rejected | sign_process_id={id} application_id={app} error={error}",
+                    id=sign_process_id,
+                    app=application.id,
+                    error=error,
+                )
+                results.append(
+                    {"sign_process_id": sign_process_id, "status": "error", "error": error}
+                )
+                continue
+            results.append({"sign_process_id": sign_process_id, "status": "ok"})
+
+        if not results:
+            return {"status": "error"}
+        return {"status": "success", "documents": results}
+
+    @staticmethod
+    def _callback_dn_name(data: dict[str, Any], item: dict[str, Any]) -> str | None:
+        for source in (item, data):
+            dn_name = source.get("dn_name")
+            if isinstance(dn_name, str) and dn_name.strip():
+                return dn_name
+            signer = source.get("signer")
+            if isinstance(signer, dict):
+                dn_name = signer.get("dn_name")
+                if isinstance(dn_name, str) and dn_name.strip():
+                    return dn_name
+        return None
 
     async def refresh_sign_status(
         self,
@@ -1514,13 +1587,80 @@ class FactoringService(BaseService):
             "jur_agreement_number": "",
         }
 
-    async def _prepare_one_print_form(
+    async def _prepare_print_forms(
         self,
         *,
-        spec: dict[str, str],
         placeholders: dict[str, str],
         client_request_id: int,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
+        """Render both print forms and open one MyNCA batch so the client signs once."""
+        mynca = self._require_mynca()
+        rendered: list[tuple[dict[str, str], bytes]] = []
+        try:
+            for spec in PRINT_FORM_SPECS:
+                rendered.append((spec, await self._render_print_form_pdf(spec, placeholders)))
+            callback_url = f"{self.public_base_url}/api/v1/factoring/ff/sign-callback"
+            sign_url, signed_docs = await mynca.sign_batch(
+                documents=[
+                    {
+                        "file_name": spec["file_name"],
+                        "pdf_bytes": pdf_bytes,
+                        "ext_id": client_request_id,
+                        "meta_data": {
+                            "type_code": "FACTORING_PRINT_FORM",
+                            "doc_type": spec["name"].upper(),
+                            "client_request_id": client_request_id,
+                            "print_form": spec["name"],
+                        },
+                    }
+                    for spec, pdf_bytes in rendered
+                ],
+                back_url=callback_url,
+                return_url=callback_url,
+                atomic=True,
+            )
+        except MyncaClientError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=exc.detail,
+            ) from exc
+
+        by_name = {
+            item["file_name"]: item
+            for item in signed_docs
+            if item.get("file_name")
+        }
+        expires_at = datetime.now(UTC) + timedelta(seconds=PRINT_FORM_PUBLIC_URL_TTL_SEC)
+        forms: list[dict[str, Any]] = []
+        for index, (spec, _) in enumerate(rendered):
+            signed = by_name.get(spec["file_name"])
+            if signed is None and index < len(signed_docs):
+                signed = signed_docs[index]
+            if signed is None or not signed.get("sign_process_id"):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"MyNCA batch не вернул sign_process_id для {spec['name']}.",
+                )
+            forms.append(
+                {
+                    "name": spec["name"],
+                    "title": spec["title"],
+                    "url": "",
+                    "file_token": token_hex(16),
+                    "url_expires_at": expires_at.isoformat(),
+                    "sign_url": sign_url,
+                    "sign_process_id": signed["sign_process_id"],
+                    "sign_group_id": signed.get("group_id"),
+                    "signed": False,
+                }
+            )
+        return forms
+
+    async def _render_print_form_pdf(
+        self,
+        spec: dict[str, str],
+        placeholders: dict[str, str],
+    ) -> bytes:
         template = await self.repository.get_template_by_code(spec["template_code"])
         path = str((template or {}).get("template_path") or "").strip()
         if not path:
@@ -1530,38 +1670,7 @@ class FactoringService(BaseService):
             )
         docx_bytes = await fetch_template_bytes(path, self.office_public_url)
         filled = fill_docx_bytes(docx_bytes, placeholders)
-        mynca = self._require_mynca()
-        try:
-            pdf_bytes = await mynca.docx_to_pdf(filled)
-            sign_url, sign_process_id = await mynca.sign_create(
-                file_name=spec["file_name"],
-                pdf_bytes=pdf_bytes,
-                ext_id=client_request_id,
-                meta_data={
-                    "type_code": "FACTORING_PRINT_FORM",
-                    "doc_type": spec["name"].upper(),
-                    "client_request_id": client_request_id,
-                    "print_form": spec["name"],
-                },
-                back_url=f"{self.public_base_url}/api/v1/factoring/ff/sign-callback",
-                return_url=f"{self.public_base_url}/api/v1/factoring/ff/sign-callback",
-            )
-        except MyncaClientError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=exc.detail,
-            ) from exc
-        expires_at = datetime.now(UTC) + timedelta(seconds=PRINT_FORM_PUBLIC_URL_TTL_SEC)
-        return {
-            "name": spec["name"],
-            "title": spec["title"],
-            "url": "",
-            "file_token": token_hex(16),
-            "url_expires_at": expires_at.isoformat(),
-            "sign_url": sign_url,
-            "sign_process_id": sign_process_id,
-            "signed": False,
-        }
+        return await self._require_mynca().docx_to_pdf(filled)
 
     def _print_form_public_url(self, application_id: int, form: dict[str, Any]) -> str:
         name = str(form.get("name") or "")
@@ -1701,6 +1810,7 @@ class FactoringService(BaseService):
             return False, None
         if not self._require_mynca().is_process_signed(payload):
             return False, None
+        # Проверка ИИН
         if expected_iin:
             signer_iin = self._extract_signer_iin(payload)
             if not signer_iin:

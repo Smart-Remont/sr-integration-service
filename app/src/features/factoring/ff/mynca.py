@@ -89,6 +89,40 @@ class MyncaClient:
             raise MyncaClientError("MyNCA sign/create did not return sign_process_id.")
         return sign_url, sign_process_id
 
+    async def sign_batch(
+        self,
+        *,
+        documents: list[dict[str, Any]],
+        back_url: str,
+        return_url: str,
+        exp_minutes: int = 60,
+        atomic: bool = True,
+    ) -> tuple[str, list[dict[str, str | None]]]:
+        """POST /sign/batch — one client signature for several PDFs.
+
+        ``atomic`` rolls every document back when the back_url rejects any of them.
+        """
+        import base64
+
+        payload = {
+            "documents": [
+                {
+                    "file_name": item["file_name"],
+                    "file_content": base64.b64encode(item["pdf_bytes"]).decode("ascii"),
+                    "ext_id": item["ext_id"],
+                    "meta_data": item.get("meta_data") or {},
+                }
+                for item in documents
+            ],
+            "back_url": back_url,
+            "return_url": return_url,
+            "exp_minutes": exp_minutes,
+            "atomic": atomic,
+            "sign_doc_method": "cms",
+        }
+        body = await self._request_json("POST", "/sign/batch", json=payload)
+        return parse_sign_batch_response(body)
+
     async def sign_status(self, sign_process_id: str) -> dict[str, Any]:
         body = await self._request_json(
             "GET",
@@ -316,6 +350,41 @@ def _b64(data: bytes) -> str:
     import base64
 
     return base64.b64encode(data).decode("ascii")
+
+
+def parse_sign_batch_response(
+    body: dict[str, Any],
+) -> tuple[str, list[dict[str, str | None]]]:
+    data = _unwrap_data(body)
+    sign_url = data.get("sign_url") if isinstance(data.get("sign_url"), str) else None
+    if not sign_url:
+        sign_url = body.get("sign_url") if isinstance(body.get("sign_url"), str) else None
+    if not sign_url or not sign_url.strip():
+        raise MyncaClientError("MyNCA sign/batch did not return sign_url.")
+
+    raw_documents = data.get("documents")
+    if not isinstance(raw_documents, list):
+        raw_documents = body.get("documents")
+    if not isinstance(raw_documents, list) or not raw_documents:
+        raise MyncaClientError("MyNCA sign/batch did not return documents.")
+
+    parsed: list[dict[str, str | None]] = []
+    for item in raw_documents:
+        if not isinstance(item, dict):
+            raise MyncaClientError("MyNCA sign/batch returned a document that is not an object.")
+        sign_process_id = item.get("sign_process_id")
+        if not isinstance(sign_process_id, str) or not sign_process_id.strip():
+            raise MyncaClientError("MyNCA sign/batch document is missing sign_process_id.")
+        file_name = item.get("file_name")
+        group_id = item.get("group_id")
+        parsed.append(
+            {
+                "file_name": file_name.strip() if isinstance(file_name, str) else None,
+                "sign_process_id": sign_process_id.strip(),
+                "group_id": group_id.strip() if isinstance(group_id, str) and group_id.strip() else None,
+            }
+        )
+    return sign_url.strip(), parsed
 
 
 def _unwrap_data(body: dict[str, Any]) -> dict[str, Any]:
