@@ -180,9 +180,11 @@ async def download_print_form(
     summary="Callback MyNCA после подписи печатной формы",
     description=(
         "Вызывает **MyNCA** (`back_url`). **Auth:** нет.\n\n"
-        "`status=SUCCESS`: ИИН из `dn_name` сверяется с ИИН заявки. "
-        "Несовпадение — `{\"status\": false, \"error\": ...}`, MyNCA откатывает подпись. "
-        "Совпадение и прочие статусы — `{\"status\": true, \"error\": null}`."
+        "Одиночная подпись: `status=SUCCESS`, ИИН из `dn_name` сверяется с ИИН заявки. "
+        "Несовпадение — `{\"status\": false, \"error\": ...}`, MyNCA откатывает подпись.\n\n"
+        "Batch (`POST /sign/batch`, `atomic: true`): в теле `documents[]`. "
+        "Ответ — `{\"status\": \"success\", \"documents\": [{\"sign_process_id\", \"status\": \"ok\"|\"error\"}]}`. "
+        "Ошибочный документ откатывает весь пакет."
     ),
 )
 async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONResponse:
