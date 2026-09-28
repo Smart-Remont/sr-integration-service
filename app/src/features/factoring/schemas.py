@@ -224,10 +224,23 @@ class FactoringRefundWebhookPayload(BaseSchema):
     covlir_status: str | None = None
 
 
+class CessionPreviewRequest(BaseSchema):
+    issue_date: str | None = Field(
+        default=None,
+        description="YYYY-MM-DD, строго раньше сегодняшнего дня (Asia/Almaty). Та же выборка, что у cession/send.",
+        examples=["2026-09-25"],
+    )
+    company_id: int | None = Field(
+        default=None,
+        description="ТОО из client_request_tab. Обязателен, если за дату несколько компаний.",
+        examples=[8],
+    )
+
+
 class SendCessionRequest(BaseSchema):
     issue_date: str | None = Field(
         default=None,
-        description="YYYY-MM-DD. По умолчанию — сегодня. Собирает ISSUED/REVERSED выдачи за эту дату.",
+        description="YYYY-MM-DD, строго раньше сегодняшнего дня (Asia/Almaty). Собирает ISSUED/REVERSED выдачи за эту дату.",
         examples=["2026-08-26"],
     )
     dry_run: bool = Field(
