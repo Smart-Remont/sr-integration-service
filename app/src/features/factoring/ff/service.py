@@ -62,8 +62,12 @@ from .limits import (
 from .templates import PRINT_FORM_SPECS, fetch_template_bytes
 
 VALID_WEBHOOK_STATUSES = {"REJECTED", "APPROVED", "ALTERNATIVE", "ISSUED", "PENDING", "IN_PROGRESS"}
-ACTIVE_PREPARE_STATUSES = {"WAITING_SIGN", "NEW", "IN_PROGRESS", "PENDING", "APPROVED", "ALTERNATIVE"}
 TERMINAL_WEBHOOK_STATUSES = {"ISSUED", "REJECTED", "REVERSED"}
+# 1 сделка = 1 заявка на факторинг: новую заявку можно готовить только если
+# по сделке нет ни одной заявки, кроме REJECTED (отказ банка) или REVERSED
+# (полный возврат) — не только пока нет "активной" (см. factoring__application_create
+# в sql/factoring/27_one_application_per_deal.sql, тот же список статусов).
+RETRYABLE_APPLICATION_STATUSES = {"REJECTED", "REVERSED"}
 PRINT_FORMS_CACHE_DIR = Path(gettempdir()) / "factoring-print-forms"
 PRINT_FORM_PUBLIC_URL_TTL_SEC = 72 * 3600
 PRINT_FORM_CACHE_TTL_SEC = 15 * 60
@@ -166,6 +170,7 @@ class FactoringService(BaseService):
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid mobile_phone: expected Kazakhstan number (+7...).",
             )
+        await self._require_deal_iin_match(request.client_request_id, iin)
 
         self._require_principal_limits(provider, request.principal)
         await self._require_deal_budget(request.client_request_id, request.principal)
@@ -197,13 +202,14 @@ class FactoringService(BaseService):
         existing = await self.repository.get_applications_by_client_request(
             request.client_request_id
         )
-        busy = [item for item in existing if item.status in ACTIVE_PREPARE_STATUSES]
+        busy = [item for item in existing if item.status not in RETRYABLE_APPLICATION_STATUSES]
         if busy:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"По сделке уже есть активная заявка id={busy[0].id} "
-                    f"(status={busy[0].status}). Дождитесь завершения или отклоните её."
+                    f"По сделке уже есть заявка на факторинг id={busy[0].id} "
+                    f"(status={busy[0].status}). Новую можно оформить только после "
+                    "отказа банка (REJECTED) или полного возврата (REVERSED)."
                 ),
             )
         credit_contract = self._generate_credit_contract(
@@ -2358,6 +2364,26 @@ class FactoringService(BaseService):
     async def _require_deal_main_client_request(self, client_request_id: int) -> None:
         state = await self.repository.get_deal_client_request_state(client_request_id)
         check_deal_client_request_state(state, client_request_id)
+
+    async def _require_deal_iin_match(self, client_request_id: int, iin: str) -> None:
+        """Факторинг можно оформить только на ИИН, заполненный в самой сделке
+        (client_request_tab.prop_iin) — не на произвольный ИИН из формы.
+        Финальный источник правды — тот же SQL guard в
+        factoring__application_create (sql/factoring/28_iin_matches_deal.sql)."""
+        deal_iin = self._normalize_iin(await self.repository.get_deal_prop_iin(client_request_id))
+        if deal_iin is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"У сделки {client_request_id} не заполнен ИИН клиента.",
+            )
+        if deal_iin != iin:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "ИИН заявки на факторинг должен совпадать с ИИН сделки "
+                    f"({deal_iin})."
+                ),
+            )
 
     async def _require_deal_budget(
         self,

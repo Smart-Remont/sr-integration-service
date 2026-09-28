@@ -384,6 +384,19 @@ class FactoringRepository(BaseRepository):
         )
         return Decimal(str(row["committed"])) if row is not None else Decimal("0")
 
+    async def get_deal_prop_iin(self, client_request_id: int) -> str | None:
+        row = await self.fetchrow(
+            """
+            SELECT prop_iin
+            FROM client_request_tab
+            WHERE client_request_id = $1
+            """,
+            client_request_id,
+        )
+        if row is None or row["prop_iin"] is None:
+            return None
+        return str(row["prop_iin"])
+
     async def get_client_request_company_id(self, client_request_id: int) -> int | None:
         row = await self.fetchrow(
             """
