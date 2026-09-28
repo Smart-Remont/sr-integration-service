@@ -33,6 +33,7 @@ from ..schemas import (
     PrescoringFactoringRequest,
     PrescoringFactoringResponse,
     PrintFormItem,
+    CessionPreviewRequest,
     SendCessionRequest,
     SendCessionResponse,
     SubmitFactoringApplicationRequest,
@@ -1006,6 +1007,85 @@ class FactoringService(BaseService):
         ]
         return SendCessionResponse(issue_date=issue_date.isoformat(), batches=batches)
 
+    async def preview_cession(self, request: CessionPreviewRequest) -> tuple[bytes, str]:
+        """PDF of one company's cession for issue_date. No EDS, no bank call, no cession_sent_at."""
+        issue_date = self._parse_issue_date(request.issue_date)
+        items = await self.repository.list_cession_batch(issue_date)
+        by_company: dict[int | None, list[CessionBatchItem]] = {}
+        for item in items:
+            by_company.setdefault(item.company_id, []).append(item)
+        if not by_company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Нет заявок для цессии за {issue_date.isoformat()}.",
+            )
+
+        company_id = request.company_id
+        if company_id is None:
+            if len(by_company) != 1:
+                ids = ", ".join(str(key) for key in by_company)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"За {issue_date.isoformat()} несколько ТОО ({ids}). "
+                        "Передайте company_id."
+                    ),
+                )
+            company_id = next(iter(by_company))
+        company_items = by_company.get(company_id)
+        if not company_items:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"company_id={company_id}: нет заявок для цессии за {issue_date.isoformat()}."
+                ),
+            )
+
+        provider = await self._require_provider()
+        framework = self._resolve_framework_contract(provider, company_id)
+        if framework is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"company_id={company_id}: нет договора факторинга в "
+                    "config.framework_contract_by_company_id."
+                ),
+            )
+        company = (
+            await self.repository.get_cession_company(company_id)
+            if company_id is not None
+            else None
+        )
+        contract_number = self._generate_cession_contract_number(issue_date, company_id)
+        payment_amount = sum((item.principal for item in company_items), Decimal("0"))
+        pdf_bytes = await self._build_cession_document(
+            partner=self._resolve_partner_for_company(provider, company_id) or "",
+            contract_number=contract_number,
+            framework_num=framework[0],
+            framework_date=framework[1],
+            issue_date=issue_date,
+            signing_date=datetime.now(ALMATY_TZ).date(),
+            payment_amount=payment_amount,
+            count=len(company_items),
+            applications=[
+                {
+                    "uuid": item.uuid,
+                    "credit_contract": item.credit_contract,
+                    "principal": item.principal,
+                    "period": item.period,
+                    "issued_at": item.issued_at,
+                }
+                for item in company_items
+            ],
+            company_name=str((company or {}).get("company_name_official") or ""),
+            company_iik=str((company or {}).get("bank_account") or ""),
+            client_signer=str((company or {}).get("director_fio") or ""),
+            signer_config=self._cession_signer_config(provider, company_id),
+            discount_by_period=parse_discount_by_period(provider.config.get("discount_by_period")),
+        )
+        filename = f"cession-{issue_date.isoformat()}-{company_id}.pdf"
+        return pdf_bytes, filename
+
     async def _send_cession_for_company(
         self,
         *,
@@ -1040,6 +1120,21 @@ class FactoringService(BaseService):
                     "config.partner_by_company_id — цессия не отправлена."
                 ),
             )
+
+        framework = self._resolve_framework_contract(provider, company_id)
+        if framework is None:
+            return CessionBatchResult(
+                company_id=company_id,
+                partner=partner,
+                payment_amount=payment_amount,
+                applications=response_items,
+                sent=False,
+                bank_message=(
+                    f"company_id={company_id}: нет договора факторинга в "
+                    "config.framework_contract_by_company_id — цессия не отправлена."
+                ),
+            )
+        framework_num, framework_date = framework
 
         if dry_run:
             return CessionBatchResult(
@@ -1081,6 +1176,8 @@ class FactoringService(BaseService):
         pdf_bytes = await self._build_cession_document(
             partner=partner,
             contract_number=contract_number,
+            framework_num=framework_num,
+            framework_date=framework_date,
             issue_date=issue_date,
             signing_date=signing_date,
             payment_amount=payment_amount,
@@ -1098,6 +1195,7 @@ class FactoringService(BaseService):
             company_name=str((company or {}).get("company_name_official") or ""),
             company_iik=str((company or {}).get("bank_account") or ""),
             client_signer=str((company or {}).get("director_fio") or ""),
+            signer_config=self._cession_signer_config(provider, company_id),
             discount_by_period=parse_discount_by_period(provider.config.get("discount_by_period")),
         )
 
@@ -1306,15 +1404,64 @@ class FactoringService(BaseService):
 
     @staticmethod
     def _parse_issue_date(raw: str | None) -> date:
+        """День выдачи. Только прошедшая дата по Алматы: сегодняшний день ещё не закрыт."""
+        today = datetime.now(ALMATY_TZ).date()
         if raw is None or not raw.strip():
-            return datetime.now(ALMATY_TZ).date()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Передайте issue_date (YYYY-MM-DD) — день выдачи. "
+                    f"Допустимы только даты раньше {today.isoformat()} (Asia/Almaty)."
+                ),
+            )
         try:
-            return date.fromisoformat(raw.strip())
+            issue_date = date.fromisoformat(raw.strip())
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="issue_date must be YYYY-MM-DD.",
             ) from exc
+        if issue_date >= today:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"issue_date {issue_date.isoformat()} должна быть раньше сегодняшнего дня "
+                    f"{today.isoformat()} (Asia/Almaty). День ещё не закрыт."
+                ),
+            )
+        return issue_date
+
+    @staticmethod
+    def _cession_signer_config(provider: FactoringProvider, company_id: int | None) -> dict[str, Any]:
+        """provider.config.cession_signer_by_company_id["<id>"]:
+        poa_num, poa_date, fio_ru_gen, position_ru_gen, position_kz."""
+        raw = provider.config.get("cession_signer_by_company_id")
+        if not isinstance(raw, dict) or company_id is None:
+            return {}
+        value = raw.get(str(company_id))
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _resolve_framework_contract(
+        provider: FactoringProvider, company_id: int | None
+    ) -> tuple[str, date] | None:
+        """provider.config.framework_contract_by_company_id["<id>"] = {num, date}:
+        the ТОО's own factoring agreement with the bank, quoted in the cession."""
+        raw = provider.config.get("framework_contract_by_company_id")
+        if not isinstance(raw, dict) or company_id is None:
+            return None
+        value = raw.get(str(company_id))
+        if not isinstance(value, dict):
+            return None
+        num = str(value.get("num") or "").strip()
+        signed = value.get("date")
+        try:
+            signed_date = date.fromisoformat(str(signed).strip()) if signed else None
+        except ValueError:
+            signed_date = None
+        if not num or signed_date is None:
+            return None
+        return num, signed_date
 
     @staticmethod
     def _generate_cession_contract_number(issue_date: date, company_id: int | None) -> str:
@@ -1330,6 +1477,8 @@ class FactoringService(BaseService):
         *,
         partner: str,
         contract_number: str,
+        framework_num: str,
+        framework_date: date,
         issue_date: date,
         signing_date: date,
         payment_amount: Decimal,
@@ -1338,6 +1487,7 @@ class FactoringService(BaseService):
         company_name: str = "",
         company_iik: str = "",
         client_signer: str = "",
+        signer_config: dict[str, Any] | None = None,
         discount_by_period: dict[int, Decimal] | None = None,
     ) -> bytes:
         template = await self.repository.get_template_by_code(CESSION_TEMPLATE_CODE)
@@ -1355,9 +1505,13 @@ class FactoringService(BaseService):
         placeholders, row_values = build_cession_placeholders(
             contract_number=contract_number,
             issue_date=issue_date,
+            framework_num=framework_num,
+            framework_date=framework_date,
+            signing_date=signing_date,
             company_name=company_name,
             company_iik=company_iik,
             client_signer=client_signer,
+            signer_config=signer_config,
             applications=items,
             discount_by_period=discount_by_period,
         )

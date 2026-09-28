@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -16,8 +17,13 @@ DEFAULT_DISCOUNT_BY_PERIOD = {
     12: Decimal("0.12"),
     24: Decimal("0.17"),
 }
-PARTNER_NAME = 'ТОО "Freedom Mobile"'
+PRODUCT_BRAND = "Smart Remont"
 DEFAULT_STATUS = "Выдано"
+DEFAULT_STATUS_KZ = "Берілді"
+DEFAULT_SIGNER_POSITION_RU_GEN = "Директора"
+DEFAULT_SIGNER_POSITION_KZ = "Директор"
+TEST_POA_NUM = "01-2026"
+TEST_MARK = " (тест)"
 
 _MONTHS_RU = (
     "января",
@@ -46,6 +52,20 @@ _MONTHS_KZ = (
     "қазан",
     "қараша",
     "желтоқсан",
+)
+_MONTHS_KZ_LOC = (
+    "қаңтардағы",
+    "ақпандағы",
+    "наурыздағы",
+    "сәуірдегі",
+    "мамырдағы",
+    "маусымдағы",
+    "шілдедегі",
+    "тамыздағы",
+    "қыркүйектегі",
+    "қазандағы",
+    "қарашадағы",
+    "желтоқсандағы",
 )
 
 _ONES_RU = (
@@ -199,7 +219,8 @@ def _as_datetime(value: date | datetime | str | None) -> datetime | None:
 
 
 def _money(amount: Decimal) -> str:
-    return f"{amount.quantize(Decimal('1')):,}".replace(",", " ")
+    # NBSP keeps "2 000 000" on one line in narrow table cells.
+    return f"{amount.quantize(Decimal('1')):,}".replace(",", "\u00a0")
 
 
 def _triad_ru(n: int, feminine: bool) -> str:
@@ -290,7 +311,79 @@ def amount_text_kz(amount: Decimal) -> str:
 
 def product_name(period: int | None) -> str:
     months = period or 12
-    return f"Freedom Mobile факторинг {months} месяцев"
+    unit = "месяц" + _ru_suffix(months, "", "а", "ев")
+    return f"{PRODUCT_BRAND} факторинг {months} {unit}"
+
+
+def product_name_kz(period: int | None) -> str:
+    return f"{PRODUCT_BRAND} факторинг {period or 12} ай"
+
+
+def bare_company_name(official: str) -> str:
+    """'ТОО «Smart Remont Azure»' -> 'Smart Remont Azure' (templates add ТОО «…» / «…» ЖШС)."""
+    name = re.sub(r"^\s*(ТОО|ЖШС)\s+", "", official or "")
+    return name.strip().strip("«»\"“”„'").strip()
+
+
+def _split_fio(fio: str) -> tuple[str, str, str]:
+    parts = (fio or "").split()
+    surname = parts[0] if parts else ""
+    name = parts[1] if len(parts) > 1 else ""
+    patronymic = " ".join(parts[2:])
+    return surname, name, patronymic
+
+
+def _is_female(surname: str, patronymic: str) -> bool:
+    tail = patronymic.lower()
+    if tail:
+        return tail.endswith(("вна", "чна", "кызы", "қызы"))
+    return surname.lower().endswith(("ова", "ева", "ёва", "ина", "ына", "ая"))
+
+
+def surname_genitive_ru(surname: str, *, female: bool) -> str:
+    """Родительный падеж фамилии (в лице Директора Усембековой …).
+
+    Only regular Russian-style endings are declined; Kazakh forms like
+    Аманкелдіұлы/-қызы and other endings are left as is."""
+    lower = surname.lower()
+    if female:
+        if lower.endswith(("ова", "ева", "ёва", "ина", "ына")):
+            return surname[:-1] + "ой"
+        if lower.endswith("ая"):
+            return surname[:-2] + "ой"
+        return surname
+    if lower.endswith(("ұлы", "улы")):
+        return surname
+    if lower.endswith(("ский", "цкий")):
+        return surname[:-2] + "ого"
+    if lower.endswith(("ов", "ев", "ёв", "ин", "ын")) or re.search(r"[бвгджзклмнпрстфхцчшщ]$", lower):
+        return surname + "а"
+    return surname
+
+
+def _initials(*names: str) -> str:
+    return "".join(f"{n[0].upper()}." for n in names if n)
+
+
+def signer_names(director_fio: str) -> dict[str, str]:
+    surname, name, patronymic = _split_fio(director_fio)
+    initials = _initials(name, patronymic)
+    female = _is_female(surname, patronymic)
+    short_ru = f"{surname} {initials}".strip()
+    return {
+        "short_ru": short_ru,
+        "short_ru_gen": f"{surname_genitive_ru(surname, female=female)} {initials}".strip(),
+        "short_kz": f"{initials} {surname}".strip(),
+    }
+
+
+def date_ru_long(value: date, *, suffix: str = "г.") -> str:
+    return f"«{value.day:02d}» {_MONTHS_RU[value.month - 1]} {value.year} {suffix}"
+
+
+def date_kz_long(value: date, *, locative: bool = False) -> str:
+    month = (_MONTHS_KZ_LOC if locative else _MONTHS_KZ)[value.month - 1]
+    return f"{value.year} жылғы «{value.day:02d}» {month}"
 
 
 def parse_discount_by_period(raw: Any) -> dict[int, Decimal]:
@@ -338,22 +431,55 @@ def format_tariff_percent(rate: Decimal) -> str:
     percent = (rate * 100).quantize(Decimal("0.1"))
     if percent == percent.to_integral():
         return f"{int(percent)}%"
-    return f"{percent.normalize()}%"
+    return f"{percent.normalize()}%".replace(".", ",")
+
+
+def _signer_basis(
+    signer_config: dict[str, Any] | None,
+    signing_date: date,
+) -> tuple[str, str]:
+    """Основание полномочий подписанта клиента (RU, KZ).
+
+    Until the real power of attorney is put into config, test values are used
+    and marked "(тест)"."""
+    config = signer_config or {}
+    poa_num = str(config.get("poa_num") or "").strip()
+    poa_date = _as_date(config.get("poa_date"))
+    mark = ""
+    if not poa_num or poa_date is None:
+        poa_num, poa_date, mark = TEST_POA_NUM, signing_date, TEST_MARK
+    ru = f"Доверенности № {poa_num} от {poa_date.day:02d} {_MONTHS_RU[poa_date.month - 1]} {poa_date.year} г.{mark}"
+    kz = f"{poa_date.year} жылғы {poa_date.day:02d} {_MONTHS_KZ_LOC[poa_date.month - 1]} № {poa_num} сенімхат{mark}"
+    return ru, kz
 
 
 def build_cession_placeholders(
     *,
     contract_number: str,
     issue_date: date,
+    framework_num: str,
+    framework_date: date,
+    signing_date: date | None = None,
     company_name: str = "",
     company_iik: str = "",
     client_signer: str = "",
+    signer_config: dict[str, Any] | None = None,
     applications: list[dict[str, Any]],
     discount_by_period: dict[int, Decimal] | None = None,
 ) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Header + table rows for the cession template.
+
+    ``issue_date`` is the sale date (date the applications were issued);
+    ``signing_date`` is the day the cession is formed and signed;
+    ``framework_num``/``framework_date`` — the ТОО's factoring agreement with the bank."""
     rates = discount_by_period or DEFAULT_DISCOUNT_BY_PERIOD
+    signing_date = signing_date or issue_date
+    client_name = bare_company_name(company_name)
+    partner_ru = f"ТОО «{client_name}»" if client_name else ""
+    partner_kz = f"«{client_name}» ЖШС" if client_name else ""
+
     total_claims = Decimal("0")
-    total_financing = Decimal("0")
+    total_discount = Decimal("0")
     rows: list[dict[str, str]] = []
     for index, item in enumerate(applications, start=1):
         principal = Decimal(str(item.get("principal") or 0))
@@ -363,28 +489,87 @@ def build_cession_placeholders(
         discount = (principal * tariff).quantize(Decimal("1"))
         financing = principal - discount
         total_claims += principal
-        total_financing += financing
+        total_discount += discount
         issued = _as_datetime(item.get("issued_at"))
+        uuid = str(item.get("uuid") or "")
+        credit_contract = str(item.get("credit_contract") or "")
         rows.append(
             {
+                "num": str(index),
+                "application_num": uuid,
+                "date": issued.strftime("%d.%m.%Y") if issued else "",
+                "time": issued.strftime("%H:%M") if issued else "",
+                "contract_sum": _money(principal),
+                "term_ru": f"{period_int} мес.",
+                "term_kz": f"{period_int} ай",
+                "tariff": format_tariff_percent(tariff),
+                "discount_sum": _money(discount),
+                "purchase_sum": _money(principal),
+                "partner_ru": partner_ru,
+                "partner_kz": partner_kz,
+                "product_ru": product_name(period_int),
+                "product_kz": product_name_kz(period_int),
+                "status_ru": DEFAULT_STATUS,
+                "status_kz": DEFAULT_STATUS_KZ,
+                "contract_num": credit_contract,
+                "financing_sum": _money(financing),
+                # legacy template (FF_FACTORING_CESSION v1)
                 "n": str(index),
-                "uuid": str(item.get("uuid") or ""),
+                "uuid": uuid,
                 "issued_date": issued.strftime("%d.%m.%Y") if issued else "",
                 "issued_time": issued.strftime("%H:%M") if issued else "",
                 "principal": _money(principal),
                 "period": str(period_int),
-                "tariff": format_tariff_percent(tariff),
                 "discount": _money(discount),
                 "purchase_amount": _money(principal),
-                "partner_name": PARTNER_NAME,
+                "partner_name": partner_ru,
                 "product_name": product_name(period_int),
                 "status": DEFAULT_STATUS,
-                "credit_contract": str(item.get("credit_contract") or ""),
+                "credit_contract": credit_contract,
                 "financing_amount": _money(financing),
             }
         )
 
+    total_financing = total_claims - total_discount
+    config = signer_config or {}
+    names = signer_names(client_signer)
+    basis_ru, basis_kz = _signer_basis(config, signing_date)
+
     header = {
+        "client_name": client_name,
+        "client_account": company_iik,
+        "financing_sum": _money(total_financing),
+        "financing_sum_words_ru": amount_text_ru(total_financing),
+        "financing_sum_words_kz": amount_text_kz(total_financing),
+        "claims_sum": _money(total_claims),
+        "claims_sum_words_ru": amount_text_ru(total_claims),
+        "claims_sum_words_kz": amount_text_kz(total_claims),
+        # Bank: стоимость уступки = сумма заказов; дисконт выставляется отдельно (п.2.3).
+        "assignment_sum": _money(total_claims),
+        "assignment_sum_words_ru": amount_text_ru(total_claims),
+        "assignment_sum_words_kz": amount_text_kz(total_claims),
+        "framework_num": framework_num,
+        "framework_date_ru": f"«{framework_date.day:02d}» {_MONTHS_RU[framework_date.month - 1]} {framework_date.year}",
+        "framework_date_kz": date_kz_long(framework_date, locative=True),
+        "total_contract_sum": _money(total_claims),
+        "total_discount_sum": _money(total_discount),
+        "total_purchase_sum": _money(total_claims),
+        "assignment_contract_num": contract_number,
+        "application_date_ru": date_ru_long(signing_date, suffix="года"),
+        "application_date_kz": date_kz_long(signing_date),
+        "sale_date_ru": date_ru_long(issue_date),
+        "sale_date_kz": f"{issue_date.year} ж. «{issue_date.day:02d}» {_MONTHS_KZ[issue_date.month - 1]}",
+        "appendix_date_ru": date_ru_long(issue_date),
+        "appendix_date_kz": date_kz_long(issue_date, locative=True),
+        "valid_from_date": issue_date.strftime("%d.%m.%Y"),
+        "client_basis_ru": basis_ru,
+        "client_basis_kz": basis_kz,
+        "client_signer_position_ru_gen": str(config.get("position_ru_gen") or DEFAULT_SIGNER_POSITION_RU_GEN),
+        "client_signer_position_kz": str(config.get("position_kz") or DEFAULT_SIGNER_POSITION_KZ),
+        "client_signer_short_ru": names["short_ru"],
+        "client_signer_short_ru_gen": str(config.get("fio_ru_gen") or names["short_ru_gen"]),
+        "client_signer_short_kz": names["short_kz"],
+        # legacy template (FF_FACTORING_CESSION v1)
         "contract_number": contract_number,
         "issue_date": issue_date.strftime("%d.%m.%Y"),
         "issue_day": f"{issue_date.day:02d}",
@@ -402,7 +587,7 @@ def build_cession_placeholders(
         "total_financing_text_kz": amount_text_kz(total_financing),
         "payment_amount": _money(total_claims),
         "payment_amount_text": amount_text_ru(total_claims),
-        "partner": PARTNER_NAME,
+        "partner": partner_ru,
         "applications_count": str(len(applications)),
     }
     return header, rows

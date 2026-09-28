@@ -28,6 +28,7 @@ from .schemas import (
     PrepareFactoringDocumentsResponse,
     PrescoringFactoringRequest,
     PrescoringFactoringResponse,
+    CessionPreviewRequest,
     SendCessionRequest,
     SendCessionResponse,
     SubmitFactoringApplicationRequest,
@@ -212,12 +213,36 @@ async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONR
 
 
 @router.post(
+    "/applications/cession/preview",
+    summary="PDF договора цессии без подписи и без отправки в банк",
+    description=(
+        "Та же выборка, что у `cession/send`: ISSUED/REVERSED за прошлый `issue_date` без "
+        "`cession_sent_at`, один PDF на ТОО. Сегодня и будущее — 422. Не ставит ЭЦП, не пишет `cession_sent_at` "
+        "и не вызывает банк. DOCX в PDF конвертирует MyNCA. Если за дату несколько ТОО, "
+        "нужен `company_id`."
+    ),
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def preview_cession(
+    _: FactoringBasicAuthDep,
+    request: CessionPreviewRequest,
+    service: FactoringServiceDep,
+) -> Response:
+    pdf, filename = await service.preview_cession(request)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
     "/applications/cession/send",
     response_model=SendCessionResponse,
     summary="Собрать выдачи за день и отправить банку договор цессии",
     description=(
-        "Собирает FACTORING-заявки со статусом ISSUED/REVERSED за `issue_date` (по умолчанию "
-        "сегодня, Asia/Almaty), которые ещё не были в цессии, группирует по ТОО "
+        "Собирает FACTORING-заявки со статусом ISSUED/REVERSED за прошлый `issue_date` "
+        "(Asia/Almaty; сегодня и будущее — 422), которые ещё не были в цессии, группирует по ТОО "
         "(`client_request_tab.company_id`) и отправляет **отдельный** договор цессии на "
         "каждое юрлицо (у каждого своя `config.partner_by_company_id` и свой ЭЦП в "
         "`nca.company_key_store_tab`). Подписывает CMS через MyNCA. При успехе помечает "

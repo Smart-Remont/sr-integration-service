@@ -1,7 +1,11 @@
 """Fill Freedom factoring DOCX templates.
 
 Bank templates use ``{{placeholder}}``; Word often splits them across ``w:t`` runs.
-We join text per paragraph, replace, then put the result into the first run.
+Matches are found on the paragraph's joined text; each replacement is written into
+the run where the placeholder starts, so formatting of other runs is preserved.
+
+Table rows containing ``{{ item.<key> }}`` (or the legacy ``{{n}}`` markers) are
+repeated once per entry of ``row_values``; ``item.<key>`` resolves to ``<key>``.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ _WP_RE = re.compile(r"<w:p\b[\s\S]*?</w:p>")
 _TR_RE = re.compile(r"<w:tr\b[\s\S]*?</w:tr>")
 _STATIC_CONTRACT = "{номер договора ЮД статично}"
 _ROW_MARKERS = ("{{n}}", "{{uuid}}", "{{credit_contract}}")
+_ITEM_ROW_RE = re.compile(r"\{\{\s*item\.")
 
 _ALIASES = {
     "borrower full_name": "borrower_full_name",
@@ -37,26 +42,44 @@ def fill_docx_bytes(
             data = source.read(item.filename)
             if item.filename.startswith("word/") and item.filename.endswith(".xml"):
                 text = data.decode("utf-8")
-                if row_values:
+                if row_values is not None:
                     text = _expand_table_rows(text, values, row_values)
                 data = _fill_xml_text(text, values).encode("utf-8")
             dest.writestr(item, data)
     return output.getvalue()
 
 
-def replace_placeholders(text: str, values: dict[str, str]) -> str:
-    def _repl(match: re.Match[str]) -> str:
-        raw = re.sub(r"\s+", " ", match.group(1)).strip()
-        key = _ALIASES.get(raw, raw.replace(" ", "_").replace(".", "_"))
-        if key in values:
-            return values[key]
-        return match.group(0)
+def _placeholder_key(raw: str) -> str:
+    raw = re.sub(r"\s+", " ", raw).strip()
+    if raw.startswith("item."):
+        raw = raw[len("item.") :]
+    return _ALIASES.get(raw, raw.replace(" ", "_").replace(".", "_"))
 
-    result = _PLACEHOLDER_RE.sub(_repl, text)
+
+def _replacements(text: str, values: dict[str, str]) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for match in _PLACEHOLDER_RE.finditer(text):
+        key = _placeholder_key(match.group(1))
+        if key in values:
+            spans.append((match.start(), match.end(), values[key]))
     contract = values.get("contract_number")
-    if contract and _STATIC_CONTRACT in result:
-        result = result.replace(_STATIC_CONTRACT, contract)
-    return result
+    if contract:
+        start = text.find(_STATIC_CONTRACT)
+        while start != -1:
+            spans.append((start, start + len(_STATIC_CONTRACT), contract))
+            start = text.find(_STATIC_CONTRACT, start + len(_STATIC_CONTRACT))
+    return sorted(spans)
+
+
+def replace_placeholders(text: str, values: dict[str, str]) -> str:
+    result: list[str] = []
+    cursor = 0
+    for start, end, value in _replacements(text, values):
+        result.append(text[cursor:start])
+        result.append(value)
+        cursor = end
+    result.append(text[cursor:])
+    return "".join(result)
 
 
 def _expand_table_rows(
@@ -64,17 +87,13 @@ def _expand_table_rows(
     values: dict[str, str],
     row_values: list[dict[str, str]],
 ) -> str:
-    if not row_values:
-        return xml_text
-
     def _repl_tr(match: re.Match[str]) -> str:
         row = match.group(0)
         joined = "".join(_xml_text(inner) for _, inner, _ in _WT_RE.findall(row))
-        if not any(marker in joined for marker in _ROW_MARKERS):
+        compact = re.sub(r"\s+", "", joined)
+        if not (_ITEM_ROW_RE.search(joined) or any(marker in compact for marker in _ROW_MARKERS)):
             return row
-        return "".join(
-            _fill_xml_text(row, {**values, **item}) for item in row_values
-        )
+        return "".join(_fill_xml_text(row, {**values, **item}) for item in row_values)
 
     return _TR_RE.sub(_repl_tr, xml_text)
 
@@ -82,20 +101,44 @@ def _expand_table_rows(
 def _fill_xml_text(text: str, values: dict[str, str]) -> str:
     def _fill_paragraph(match: re.Match[str]) -> str:
         paragraph = match.group(0)
-        texts = [_xml_text(inner) for _, inner, _ in _WT_RE.findall(paragraph)]
-        if not texts:
+        parts = _WT_RE.findall(paragraph)
+        if not parts:
             return paragraph
+        texts = [_xml_text(inner) for _, inner, _ in parts]
         joined = "".join(texts)
-        replaced = replace_placeholders(joined, values)
-        if replaced == joined:
+        spans = _replacements(joined, values)
+        if not spans:
             return paragraph
-        first = True
+
+        new_texts: list[str] = []
+        offset = 0
+        for segment in texts:
+            seg_start, seg_end = offset, offset + len(segment)
+            offset = seg_end
+            out: list[str] = []
+            pos = seg_start
+            for start, end, value in spans:
+                if end <= seg_start or start >= seg_end:
+                    continue
+                if start >= pos:
+                    out.append(joined[pos:start])
+                    out.append(value)
+                    pos = min(end, seg_end)
+                elif end > pos:
+                    pos = min(end, seg_end)
+            out.append(joined[pos:seg_end])
+            new_texts.append("".join(out))
+
+        index = 0
 
         def _put_text(wt_match: re.Match[str]) -> str:
-            nonlocal first
-            body = escape(replaced) if first else ""
-            first = False
-            return f"{wt_match.group(1)}{body}{wt_match.group(3)}"
+            nonlocal index
+            body = new_texts[index]
+            index += 1
+            open_tag = wt_match.group(1)
+            if "xml:space" not in open_tag:
+                open_tag = open_tag[:-1] + ' xml:space="preserve">'
+            return f"{open_tag}{escape(body)}{wt_match.group(3)}"
 
         return _WT_RE.sub(_put_text, paragraph)
 
