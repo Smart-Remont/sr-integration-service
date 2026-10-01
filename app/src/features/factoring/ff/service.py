@@ -51,6 +51,9 @@ from .repo import (
 )
 from .cession_placeholders import (
     allowed_periods,
+    amount_text_kz,
+    amount_text_ru,
+    bare_company_name,
     build_cession_placeholders,
     parse_discount_by_period,
 )
@@ -83,6 +86,15 @@ class _PrescoringOutcome:
     max_limit: Decimal | None
     skipped: bool
     checked_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class _NotificationContext:
+    template_code: str
+    partner_name: str
+    partner_signer: str
+    framework_num: str
+    framework_date: date
 
 
 class FactoringService(BaseService):
@@ -180,6 +192,7 @@ class FactoringService(BaseService):
         partner = await self._require_partner_for_client_request(
             provider, request.client_request_id
         )
+        notification = await self._require_notification_context(provider, request.client_request_id)
         prescoring = await self._run_prescoring(
             provider=provider,
             client_request_id=request.client_request_id,
@@ -225,10 +238,12 @@ class FactoringService(BaseService):
             period=request.period,
             credit_contract=credit_contract,
             client_request_id=request.client_request_id,
+            notification=notification,
         )
         print_forms = await self._prepare_print_forms(
             placeholders=placeholders,
             client_request_id=request.client_request_id,
+            template_codes={"notification": notification.template_code},
         )
 
         credit_goods = (
@@ -1743,6 +1758,7 @@ class FactoringService(BaseService):
         period: int,
         credit_contract: str,
         client_request_id: int,
+        notification: _NotificationContext,
     ) -> dict[str, str]:
         amount = f"{principal:,.0f}".replace(",", " ")
         now = datetime.now(ALMATY_TZ)
@@ -1753,8 +1769,8 @@ class FactoringService(BaseService):
             "borrower_number": phone,
             "borrower_otp": "",
             "principal": amount,
-            "principal_kz": amount,
-            "principal_ru": amount,
+            "principal_kz": amount_text_kz(principal),
+            "principal_ru": amount_text_ru(principal),
             "period": str(period),
             "created_at": created_at,
             "contract_number": credit_contract,
@@ -1763,20 +1779,75 @@ class FactoringService(BaseService):
             "client_request_id": str(client_request_id),
             "product_full_name": "Ремонт",
             "day_of_month": str(now.day),
-            "jur_agreement_number": "",
+            "partner_name": notification.partner_name,
+            "partner_signer": notification.partner_signer,
+            "framework_num": notification.framework_num,
+            "framework_date": notification.framework_date.strftime("%d.%m.%Y"),
         }
+
+    async def _require_notification_context(
+        self,
+        provider: FactoringProvider,
+        client_request_id: int,
+    ) -> _NotificationContext:
+        """Уведомление клиенту подписано и заверено печатью конкретного ТОО, поэтому
+        у каждого ТОО свой шаблон (provider.config.notification_template_by_company_id).
+        Без шаблона, рамочного договора или реквизитов ТОО документ не формируем —
+        иначе клиент получит уведомление с чужой подписью и печатью."""
+        company_id = await self.repository.get_client_request_company_id(client_request_id)
+        mapping = provider.config.get("notification_template_by_company_id")
+        template_code = (
+            str(mapping.get(str(company_id)) or "").strip()
+            if isinstance(mapping, dict) and company_id is not None
+            else ""
+        )
+        if not template_code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Для ТОО company_id={company_id} не задан шаблон уведомления факторинга.",
+            )
+        framework = self._resolve_framework_contract(provider, company_id)
+        if framework is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Для ТОО company_id={company_id} не задан рамочный договор факторинга.",
+            )
+        company = await self.repository.get_cession_company(company_id) or {}
+        partner_name = bare_company_name(str(company.get("company_name_official") or ""))
+        partner_signer = str(company.get("director_fio") or "").strip()
+        if not partner_name or not partner_signer:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"У ТОО company_id={company_id} не заполнено официальное название или ФИО директора.",
+            )
+        template = await self.repository.get_template_by_code(template_code)
+        if not str((template or {}).get("template_path") or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Шаблон уведомления {template_code} не загружен в систему.",
+            )
+        return _NotificationContext(
+            template_code=template_code,
+            partner_name=partner_name,
+            partner_signer=partner_signer,
+            framework_num=framework[0],
+            framework_date=framework[1],
+        )
 
     async def _prepare_print_forms(
         self,
         *,
         placeholders: dict[str, str],
         client_request_id: int,
+        template_codes: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Render both print forms and open one MyNCA batch so the client signs once."""
         mynca = self._require_mynca()
         rendered: list[tuple[dict[str, str], bytes]] = []
         try:
-            for spec in PRINT_FORM_SPECS:
+            for base_spec in PRINT_FORM_SPECS:
+                spec = dict(base_spec)
+                spec["template_code"] = (template_codes or {}).get(spec["name"], spec["template_code"])
                 rendered.append((spec, await self._render_print_form_pdf(spec, placeholders)))
             callback_url = f"{self.public_base_url}/api/v1/factoring/ff/sign-callback"
             sign_url, signed_docs = await mynca.sign_batch(
