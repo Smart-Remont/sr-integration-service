@@ -516,6 +516,15 @@ class FactoringService(BaseService):
             is_knox=request.is_knox,
         )
         reference_id = str(application.id)
+        if self._prescoring_required(provider):
+            if application.prescoring_score is None or application.prescoring_max_limit is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "Для отправки в банк нужны score и max_limit прескоринга. "
+                        "Подготовьте документы заново (prepare)."
+                    ),
+                )
         bank_payload = self._build_apply_payload(
             provider=provider,
             iin=iin,
@@ -531,6 +540,8 @@ class FactoringService(BaseService):
             hook_url=hook_url,
             success_url=success_url,
             failure_url=failure_url,
+            prescoring_score=application.prescoring_score,
+            prescoring_max_limit=application.prescoring_max_limit,
         )
         await self._log_event(
             "FF_APPLY_REQUEST",
@@ -1663,6 +1674,8 @@ class FactoringService(BaseService):
         hook_url: str,
         success_url: str,
         failure_url: str,
+        prescoring_score: Decimal | float | None = None,
+        prescoring_max_limit: Decimal | None = None,
     ) -> dict[str, Any]:
         credit_params: dict[str, Any] = {
             "period": request.period,
@@ -1673,6 +1686,12 @@ class FactoringService(BaseService):
         if request.interest_rate is not None:
             credit_params["interest_rate"] = float(request.interest_rate)
 
+        credit_configs: dict[str, Any] = {"is_knox": request.is_knox}
+        if prescoring_score is not None:
+            credit_configs["score"] = float(prescoring_score)
+        if prescoring_max_limit is not None:
+            credit_configs["max_limit"] = float(prescoring_max_limit)
+
         payload: dict[str, Any] = {
             "iin": iin,
             "mobile_phone": phone,
@@ -1682,7 +1701,7 @@ class FactoringService(BaseService):
             "credit_contract": credit_contract,
             "credit_params": credit_params,
             "print_forms": print_forms,
-            "credit_configs": {"is_knox": request.is_knox},
+            "credit_configs": credit_configs,
             "additional_information": {
                 "hook_url": hook_url,
                 "failure_url": failure_url,
