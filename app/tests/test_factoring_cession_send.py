@@ -168,3 +168,25 @@ async def test_contract_number_gets_suffix_when_base_already_used() -> None:
     response = await service.send_daily_cession(_request())
 
     assert response.batches[0].contract_number == f"{base}-3"
+
+
+@pytest.mark.asyncio
+async def test_sent_by_is_audited_but_never_sent_to_bank() -> None:
+    service = _service()
+
+    await service.send_daily_cession(_request(sent_by=2543))
+
+    for event_type in ("CESSION_REQUEST", "CESSION_SENT"):
+        assert _logged(service, event_type)[0]["sent_by"] == 2543
+    assert "sent_by" not in service.client.send_cession.await_args.kwargs["payload"]
+
+
+@pytest.mark.asyncio
+async def test_sent_by_is_audited_on_bank_rejection() -> None:
+    service = _service()
+    service.client.send_cession.side_effect = FactoringClientError(status_code=400, detail="HTTP 400: no")
+
+    with pytest.raises(HTTPException):
+        await service.send_daily_cession(_request(sent_by=2543))
+
+    assert _logged(service, "CESSION_FAILED")[0]["sent_by"] == 2543

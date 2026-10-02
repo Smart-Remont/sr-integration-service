@@ -247,6 +247,11 @@ class SendCessionRequest(BaseSchema):
         description="ТОО (client_request_tab.company_id), для которого отправляется цессия. Обязателен: одна цессия — одно ТОО.",
         examples=[8],
     )
+    sent_by: int | None = Field(
+        default=None,
+        description="employee_id того, кто нажал «Отправить» в MySpace. Пишется в события цессии (аудит).",
+        examples=[2543],
+    )
     expected_count: int | None = Field(
         default=None,
         description="Число заявок, которое пользователь видел в превью. Не совпало — 409, ничего не отправляется.",
