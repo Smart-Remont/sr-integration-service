@@ -1029,6 +1029,8 @@ class FactoringService(BaseService):
                 continue
             by_company.setdefault(item.company_id, []).append(item)
 
+        self._require_expected_batch(request, by_company.get(request.company_id) or [])
+
         batches = [
             await self._send_cession_for_company(
                 provider=provider,
@@ -1040,6 +1042,27 @@ class FactoringService(BaseService):
             for company_id, company_items in by_company.items()
         ]
         return SendCessionResponse(issue_date=issue_date.isoformat(), batches=batches)
+
+    @staticmethod
+    def _require_expected_batch(request: SendCessionRequest, items: list[CessionBatchItem]) -> None:
+        """The user confirmed the preview; refuse to send if the batch changed since."""
+        if request.expected_count is not None and request.expected_count != len(items):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Состав цессии изменился: в превью {request.expected_count} заявок, "
+                    f"сейчас {len(items)}. Откройте превью заново."
+                ),
+            )
+        amount = sum((item.principal for item in items), Decimal("0"))
+        if request.expected_amount is not None and request.expected_amount != amount:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Сумма цессии изменилась: в превью {request.expected_amount}, "
+                    f"сейчас {amount}. Откройте превью заново."
+                ),
+            )
 
     async def preview_cession(self, request: CessionPreviewRequest) -> tuple[bytes, str]:
         """PDF of one company's cession for issue_date. No EDS, no bank call, no cession_sent_at."""
@@ -1199,7 +1222,7 @@ class FactoringService(BaseService):
         mynca = self._require_mynca()
         mynca.require_configured()
 
-        contract_number = self._generate_cession_contract_number(issue_date, company_id)
+        contract_number = await self._next_cession_contract_number(issue_date, company_id)
         signing_date = datetime.now(ALMATY_TZ).date()
 
         company = (
@@ -1302,18 +1325,38 @@ class FactoringService(BaseService):
             cession_path = "/ffc-api-public/custom/partner-document/assignment-agreement/"
 
         application_ids = [item.id for item in company_items]
-        mark_sent = getattr(
-            self.repository, "mark_cession_sent_committed", self.repository.mark_cession_sent
-        )
-        await mark_sent(
+        failure_payload = {
+            "issue_date": issue_date.isoformat(),
+            "company_id": company_id,
+            "contract_number": contract_number,
+        }
+
+        # Токен до отметки: ошибка авторизации — заведомо «не отправлено».
+        try:
+            access_token = await self._ensure_valid_token(provider)
+        except FactoringClientError as exc:
+            await self._log_cession_failed(
+                company_items, {**failure_payload, "http_status": exc.status_code, "error": exc.detail}
+            )
+            raise self._map_client_error(exc) from exc
+
+        # Отметка — это и блокировка: второй параллельный запрос по тем же
+        # заявкам отметит 0 строк и получит 409, не отправив цессию дважды.
+        marked = await self.repository.mark_cession_sent_committed(
             application_ids,
             contract_number,
             sign_process_id=sign_process_id,
             sign_group_id=sign_group_id,
         )
+        if marked != len(application_ids):
+            if marked:
+                await self.repository.unmark_cession_sent_committed(application_ids, contract_number)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Цессия по этим заявкам уже отправляется или отправлена. Обновите страницу.",
+            )
 
         try:
-            access_token = await self._ensure_valid_token(provider)
             try:
                 bank_response = await self.client.send_cession(
                     access_token=access_token,
@@ -1322,37 +1365,38 @@ class FactoringService(BaseService):
                     **self._request_kwargs(provider),
                 )
             except FactoringClientError as exc:
-                if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-                    access_token = await self._authenticate_and_store_token(provider)
-                    bank_response = await self.client.send_cession(
-                        access_token=access_token,
-                        payload=bank_payload,
-                        cession_path=cession_path,
-                        **self._request_kwargs(provider),
-                    )
-                else:
+                if exc.status_code != status.HTTP_401_UNAUTHORIZED:
                     raise
+                access_token = await self._authenticate_and_store_token(provider)
+                bank_response = await self.client.send_cession(
+                    access_token=access_token,
+                    payload=bank_payload,
+                    cession_path=cession_path,
+                    **self._request_kwargs(provider),
+                )
         except FactoringClientError as exc:
-            await self._log_event(
-                "CESSION_FAILED",
-                factoring_id=company_items[0].id,
-                source="FF_FACTORING",
-                committed=True,
-                payload={
-                    "issue_date": issue_date.isoformat(),
-                    "company_id": company_id,
-                    "contract_number": contract_number,
+            # 4xx — банк ответил отказом, цессия точно не принята: снимаем
+            # отметку, можно отправить заново. 5xx/таймаут/сеть — неизвестно,
+            # дошла ли: отметку оставляем, чтобы не отправить дважды, в
+            # реестре это «нужна проверка» (нет CESSION_SENT).
+            rejected = 400 <= exc.status_code < 500
+            await self._log_cession_failed(
+                company_items,
+                {
+                    **failure_payload,
                     "http_status": exc.status_code,
                     "error": exc.detail,
+                    "bank_rejected": rejected,
                 },
             )
-            mapped = self._map_client_error(exc)
-            if mapped.status_code < 500:
-                await self.repository.unmark_cession_sent(application_ids, contract_number)
-            raise mapped from exc
-        except HTTPException as exc:
-            if exc.status_code < 500:
-                await self.repository.unmark_cession_sent(application_ids, contract_number)
+            if rejected:
+                await self.repository.unmark_cession_sent_committed(application_ids, contract_number)
+            raise self._map_client_error(exc) from exc
+        except Exception as exc:
+            await self._log_cession_failed(
+                company_items,
+                {**failure_payload, "error": str(exc) or type(exc).__name__, "bank_rejected": False},
+            )
             raise
 
         await self._log_event(
@@ -1496,6 +1540,28 @@ class FactoringService(BaseService):
         if not num or signed_date is None:
             return None
         return num, signed_date
+
+    async def _next_cession_contract_number(self, issue_date: date, company_id: int | None) -> str:
+        """Base number, or base-2, base-3… if the base was already used for this
+        date and ТОО (late issue after a sent cession). Numbers of rejected
+        attempts are freed by unmark and reused."""
+        base = self._generate_cession_contract_number(issue_date, company_id)
+        used = set(await self.repository.list_cession_contract_numbers(base))
+        if base not in used:
+            return base
+        n = 2
+        while f"{base}-{n}" in used:
+            n += 1
+        return f"{base}-{n}"
+
+    async def _log_cession_failed(self, company_items: list[CessionBatchItem], payload: dict[str, Any]) -> None:
+        await self._log_event(
+            "CESSION_FAILED",
+            factoring_id=company_items[0].id,
+            source="FF_FACTORING",
+            committed=True,
+            payload=payload,
+        )
 
     @staticmethod
     def _generate_cession_contract_number(issue_date: date, company_id: int | None) -> str:

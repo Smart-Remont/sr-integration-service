@@ -247,6 +247,16 @@ class SendCessionRequest(BaseSchema):
         description="ТОО (client_request_tab.company_id), для которого отправляется цессия. Обязателен: одна цессия — одно ТОО.",
         examples=[8],
     )
+    expected_count: int | None = Field(
+        default=None,
+        description="Число заявок, которое пользователь видел в превью. Не совпало — 409, ничего не отправляется.",
+        examples=[1],
+    )
+    expected_amount: Decimal | None = Field(
+        default=None,
+        description="Сумма, которую пользователь видел в превью. Не совпала — 409, ничего не отправляется.",
+        examples=["1200000"],
+    )
     dry_run: bool = Field(
         default=False,
         description="Если true — считает сумму и список заявок, но не подписывает и не отправляет в банк.",

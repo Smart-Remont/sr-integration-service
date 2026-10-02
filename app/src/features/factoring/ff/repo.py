@@ -614,6 +614,34 @@ class FactoringRepository(BaseRepository):
                     sign_group_id=sign_group_id,
                 )
 
+    async def unmark_cession_sent_committed(
+        self,
+        application_ids: list[int],
+        contract_number: str | None = None,
+    ) -> int:
+        """Un-stamp on a separate connection: the request transaction is rolled
+        back when the service raises after a bank rejection, which would undo
+        an un-mark done on the request connection."""
+        from src.database.pool import get_db_pool
+
+        pool = await get_db_pool()
+        async with pool.acquire() as connection:
+            other = FactoringRepository(connection=connection)
+            async with connection.transaction():
+                return await other.unmark_cession_sent(application_ids, contract_number)
+
+    async def list_cession_contract_numbers(self, prefix: str) -> list[str]:
+        rows = await self.fetch(
+            """
+            SELECT DISTINCT cession_contract_number
+            FROM installment_application_tab
+            WHERE product_type = 'FACTORING'
+              AND cession_contract_number LIKE $1 || '%'
+            """,
+            prefix,
+        )
+        return [row["cession_contract_number"] for row in rows]
+
     async def unmark_cession_sent(
         self,
         application_ids: list[int],
