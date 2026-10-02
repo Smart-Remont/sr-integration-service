@@ -243,6 +243,10 @@ class SendCessionRequest(BaseSchema):
         description="YYYY-MM-DD, строго раньше сегодняшнего дня (Asia/Almaty). Собирает ISSUED/REVERSED выдачи за эту дату.",
         examples=["2026-08-26"],
     )
+    company_id: int = Field(
+        description="ТОО (client_request_tab.company_id), для которого отправляется цессия. Обязателен: одна цессия — одно ТОО.",
+        examples=[8],
+    )
     dry_run: bool = Field(
         default=False,
         description="Если true — считает сумму и список заявок, но не подписывает и не отправляет в банк.",

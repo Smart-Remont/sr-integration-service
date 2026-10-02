@@ -1025,6 +1025,8 @@ class FactoringService(BaseService):
         provider = await self._require_provider()
         by_company: dict[int | None, list[CessionBatchItem]] = {}
         for item in items:
+            if item.company_id != request.company_id:
+                continue
             by_company.setdefault(item.company_id, []).append(item)
 
         batches = [
