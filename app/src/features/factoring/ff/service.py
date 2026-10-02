@@ -1038,6 +1038,7 @@ class FactoringService(BaseService):
                 company_items=company_items,
                 issue_date=issue_date,
                 dry_run=request.dry_run,
+                sent_by=request.sent_by,
             )
             for company_id, company_items in by_company.items()
         ]
@@ -1151,6 +1152,7 @@ class FactoringService(BaseService):
         company_items: list[CessionBatchItem],
         issue_date: date,
         dry_run: bool,
+        sent_by: int | None = None,
     ) -> CessionBatchResult:
         payment_amount = sum((item.principal for item in company_items), Decimal("0"))
         response_items = [
@@ -1213,6 +1215,7 @@ class FactoringService(BaseService):
                 committed=True,
                 payload={
                     "issue_date": issue_date.isoformat(),
+                    "sent_by": sent_by,
                     "company_id": company_id,
                     "error": self._extract_error_message(exc),
                 },
@@ -1280,6 +1283,7 @@ class FactoringService(BaseService):
                 committed=True,
                 payload={
                     "issue_date": issue_date.isoformat(),
+                    "sent_by": sent_by,
                     "company_id": company_id,
                     "error": exc.detail,
                 },
@@ -1304,6 +1308,7 @@ class FactoringService(BaseService):
             committed=True,
             payload={
                 "issue_date": issue_date.isoformat(),
+                "sent_by": sent_by,
                 "signing_date": signing_date.isoformat(),
                 "company_id": company_id,
                 "partner": partner,
@@ -1327,6 +1332,7 @@ class FactoringService(BaseService):
         application_ids = [item.id for item in company_items]
         failure_payload = {
             "issue_date": issue_date.isoformat(),
+            "sent_by": sent_by,
             "company_id": company_id,
             "contract_number": contract_number,
         }
@@ -1406,6 +1412,7 @@ class FactoringService(BaseService):
             committed=True,
             payload={
                 "issue_date": issue_date.isoformat(),
+                "sent_by": sent_by,
                 "company_id": company_id,
                 "contract_number": contract_number,
                 "sign_process_id": sign_process_id,
