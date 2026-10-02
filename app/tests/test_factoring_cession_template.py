@@ -269,15 +269,35 @@ async def test_cession_send_skips_company_without_framework_contract() -> None:
     }
     service = _preview_service([_batch_item(1, 8), _batch_item(2, 10)], config=config)
 
-    response = await service.send_daily_cession(
-        SendCessionRequest(issue_date=_yesterday(), dry_run=True)
+    ok = await service.send_daily_cession(
+        SendCessionRequest(issue_date=_yesterday(), company_id=8, dry_run=True)
+    )
+    skipped = await service.send_daily_cession(
+        SendCessionRequest(issue_date=_yesterday(), company_id=10, dry_run=True)
     )
 
-    by_company = {batch.company_id: batch for batch in response.batches}
-    assert by_company[8].bank_message.startswith("dry_run")
-    assert by_company[10].sent is False
-    assert "framework_contract_by_company_id" in by_company[10].bank_message
+    assert ok.batches[0].bank_message.startswith("dry_run")
+    assert skipped.batches[0].sent is False
+    assert "framework_contract_by_company_id" in skipped.batches[0].bank_message
     service.client.send_cession.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cession_send_sends_only_requested_company() -> None:
+    config = {
+        "partner_by_company_id": {"8": "FACTORING_AZ", "10": "FACTORING_VI"},
+        "framework_contract_by_company_id": {
+            "8": {"num": "А0-17/703", "date": "2026-09-04"},
+            "10": {"num": "А0-17/706", "date": "2026-09-04"},
+        },
+    }
+    service = _preview_service([_batch_item(1, 8), _batch_item(2, 10)], config=config)
+
+    response = await service.send_daily_cession(
+        SendCessionRequest(issue_date=_yesterday(), company_id=10, dry_run=True)
+    )
+
+    assert [batch.company_id for batch in response.batches] == [10]
 
 
 @pytest.mark.asyncio
@@ -310,7 +330,7 @@ async def test_cession_rejects_today_and_future(issue_date: str | None) -> None:
 
     for request in (
         CessionPreviewRequest(issue_date=issue_date),
-        SendCessionRequest(issue_date=issue_date),
+        SendCessionRequest(issue_date=issue_date, company_id=8),
     ):
         with pytest.raises(HTTPException) as exc:
             if isinstance(request, CessionPreviewRequest):
@@ -320,3 +340,8 @@ async def test_cession_rejects_today_and_future(issue_date: str | None) -> None:
         assert exc.value.status_code == 422
 
     service.repository.list_cession_batch.assert_not_awaited()
+
+
+def test_cession_send_requires_company_id() -> None:
+    with pytest.raises(ValueError):
+        SendCessionRequest(issue_date="2026-09-25")
