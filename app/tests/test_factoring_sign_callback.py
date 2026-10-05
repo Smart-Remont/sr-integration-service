@@ -6,6 +6,10 @@ from src.features.factoring.ff.mynca import MyncaClientError, parse_sign_batch_r
 from src.features.factoring.ff.service import FactoringService
 from src.features.factoring.schemas import FactoringApplicationResponse
 
+# IMPORTANT! Проверка ИИН подписанта ВРЕМЕННО ОТКЛЮЧЕНА для теста с Freedom
+# (service._sign_callback_iin_error). Снять skip вместе с возвратом проверки.
+IIN_CHECK_DISABLED = pytest.mark.skip(reason="IMPORTANT: проверка ИИН подписанта временно отключена")
+
 
 def _application(*, iin: str | None = "040516551071") -> FactoringApplicationResponse:
     return FactoringApplicationResponse(
@@ -24,6 +28,7 @@ def _service(application: FactoringApplicationResponse | None) -> FactoringServi
     return FactoringService(repository=repository, client=MagicMock(), app_env="test")
 
 
+@IIN_CHECK_DISABLED
 @pytest.mark.asyncio
 async def test_sign_callback_rejects_iin_mismatch():
     dn_name = "CN=Other, SERIALNUMBER=IIN911019401457"
@@ -61,6 +66,7 @@ async def test_sign_callback_acks_matching_iin():
     assert result == {"status": True, "error": None}
 
 
+@IIN_CHECK_DISABLED
 @pytest.mark.asyncio
 async def test_sign_callback_rejects_missing_dn_name():
     svc = _service(_application())
@@ -112,6 +118,7 @@ async def test_batch_sign_callback_acks_both_documents():
     }
 
 
+@IIN_CHECK_DISABLED
 @pytest.mark.asyncio
 async def test_batch_sign_callback_rejects_iin_on_every_document():
     dn_name = "CN=Other, SERIALNUMBER=IIN911019401457"
