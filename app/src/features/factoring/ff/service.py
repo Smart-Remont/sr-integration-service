@@ -352,21 +352,26 @@ class FactoringService(BaseService):
         application: FactoringApplicationResponse,
         data: dict[str, Any],
     ) -> str | None:
-        expected_iin = FactoringService._normalize_iin(
-            (application.request_payload or {}).get("iin")
-        )
-        dn_name = data.get("dn_name")
-        if not isinstance(dn_name, str) or not dn_name.strip():
-            return "Данные подписавшего не были получены"
-        if not expected_iin:
-            return "ИИН заявки не заполнен"
-        cert_iin = FactoringService._extract_iin_from_dn(dn_name)
-        if cert_iin == expected_iin:
-            return None
-        return (
-            f"ИИН подписанта не соответствует заявке "
-            f"(ожидается {expected_iin}, DN: {dn_name})"
-        )
+        # IMPORTANT! ВРЕМЕННО ОТКЛЮЧЕНО для теста с Freedom (2026-10-05): документы
+        # по сделкам с разными ИИН подписывает один тестировщик своей ЭЦП.
+        # ВЕРНУТЬ ПЕРЕД БОЕМ — иначе документы может подписать кто угодно, а не заёмщик.
+        # Вторая отключённая половина проверки — в _print_form_sign_state.
+        return None
+        # expected_iin = FactoringService._normalize_iin(
+        #     (application.request_payload or {}).get("iin")
+        # )
+        # dn_name = data.get("dn_name")
+        # if not isinstance(dn_name, str) or not dn_name.strip():
+        #     return "Данные подписавшего не были получены"
+        # if not expected_iin:
+        #     return "ИИН заявки не заполнен"
+        # cert_iin = FactoringService._extract_iin_from_dn(dn_name)
+        # if cert_iin == expected_iin:
+        #     return None
+        # return (
+        #     f"ИИН подписанта не соответствует заявке "
+        #     f"(ожидается {expected_iin}, DN: {dn_name})"
+        # )
 
     async def _handle_batch_sign_callback(
         self,
@@ -2143,15 +2148,17 @@ class FactoringService(BaseService):
             return False, None
         if not self._require_mynca().is_process_signed(payload):
             return False, None
-        # Проверка ИИН
-        if expected_iin:
-            signer_iin = self._extract_signer_iin(payload)
-            if not signer_iin:
-                return False, "В подписи ЭЦП нет ИИН (dn_name / signer.subject.iin)"
-            if signer_iin != expected_iin:
-                return False, (
-                    f"ИИН ЭЦП {signer_iin} не совпадает с ИИН заявки {expected_iin}"
-                )
+        # IMPORTANT! ВРЕМЕННО ОТКЛЮЧЕНО для теста с Freedom (2026-10-05): проверка,
+        # что ИИН ЭЦП совпадает с ИИН заявки. ВЕРНУТЬ ПЕРЕД БОЕМ вместе с
+        # _sign_callback_iin_error — иначе в банк уйдут документы, подписанные не заёмщиком.
+        # if expected_iin:
+        #     signer_iin = self._extract_signer_iin(payload)
+        #     if not signer_iin:
+        #         return False, "В подписи ЭЦП нет ИИН (dn_name / signer.subject.iin)"
+        #     if signer_iin != expected_iin:
+        #         return False, (
+        #             f"ИИН ЭЦП {signer_iin} не совпадает с ИИН заявки {expected_iin}"
+        #         )
         return True, None
 
     async def _poll_print_form_signatures(
