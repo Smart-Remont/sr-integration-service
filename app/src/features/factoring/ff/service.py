@@ -457,13 +457,17 @@ class FactoringService(BaseService):
     ) -> CreateFactoringApplicationResponse:
         application = await self.get_application_by_id(application_id)
         provider = await self._require_provider()
-        self._require_stored_prescoring(provider, application)
         await self._require_webhook_credentials()
         if application.status not in {"WAITING_SIGN", "NEW"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Application status {application.status} cannot be submitted to the bank.",
             )
+        # До любых записей в строку заявки: отказ прескоринга закрывает её
+        # отдельным соединением, которое иначе ждало бы блокировку этого запроса.
+        await self._refresh_stale_prescoring(provider, application)
+        application = await self.get_application_by_id(application_id)
+        self._require_stored_prescoring(provider, application)
         documents = await self._poll_print_form_signatures(application)
         unsigned = [item.title for item in documents if not item.signed]
         if unsigned:
@@ -558,10 +562,12 @@ class FactoringService(BaseService):
             prescoring_score=application.prescoring_score,
             prescoring_max_limit=application.prescoring_max_limit,
         )
+        # committed: ошибка ниже откатывает транзакцию запроса вместе с журналом.
         await self._log_event(
             "FF_APPLY_REQUEST",
             factoring_id=application.id,
             source="FF_FACTORING",
+            committed=True,
             payload=bank_payload,
         )
         try:
@@ -571,6 +577,7 @@ class FactoringService(BaseService):
                 "FF_APPLY_FAILED",
                 factoring_id=application.id,
                 source="FF_FACTORING",
+                committed=True,
                 payload={"error": self._extract_error_message(exc), "request": bank_payload},
             )
             raise
@@ -581,6 +588,7 @@ class FactoringService(BaseService):
                 "FF_APPLY_FAILED",
                 factoring_id=application.id,
                 source="FF_FACTORING",
+                committed=True,
                 payload={"error": "Bank did not return uuid", "response": response_payload},
             )
             raise HTTPException(
@@ -2361,14 +2369,79 @@ class FactoringService(BaseService):
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="У заявки нет времени проверки прескоринга. Подготовьте документы заново.",
             )
-        if checked_at.tzinfo is None:
-            checked_at = checked_at.replace(tzinfo=UTC)
-        age_sec = (datetime.now(UTC) - checked_at).total_seconds()
-        if age_sec > self._prescoring_validity_sec(provider):
+        if self._prescoring_expired(provider, checked_at):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Прескоринг устарел. Подготовьте документы заново (prepare).",
             )
+
+    def _prescoring_expired(self, provider: FactoringProvider, checked_at: datetime) -> bool:
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=UTC)
+        age_sec = (datetime.now(UTC) - checked_at).total_seconds()
+        return age_sec > self._prescoring_validity_sec(provider)
+
+    async def _refresh_stale_prescoring(
+        self,
+        provider: FactoringProvider,
+        application: FactoringApplicationResponse,
+    ) -> None:
+        """Клиент может подписать документы позже, чем действует прескоринг.
+        Раньше такая заявка застревала в WAITING_SIGN навсегда: отправить нельзя
+        (прескоринг устарел), подготовить новую тоже (по сделке уже есть
+        заявка). Поэтому перед отправкой прескоринг повторяем; отказ закрывает
+        заявку (REJECTED), и по сделке можно оформить новую."""
+        if not self._prescoring_required(provider):
+            return
+        if (application.prescoring_status or "").upper() != "APPROVED":
+            return
+        checked_at = application.prescoring_checked_at
+        if checked_at is None or not self._prescoring_expired(provider, checked_at):
+            return
+        stored_contacts = application.request_payload or {}
+        iin = self._normalize_iin(stored_contacts.get("iin"))
+        phone = self._normalize_phone(stored_contacts.get("mobile_phone"))
+        if iin is None or phone is None:
+            return
+        partner = application.partner or await self._require_partner_for_client_request(
+            provider, application.client_request_id
+        )
+        principal = application.principal or Decimal("0")
+        outcome = await self._run_prescoring(
+            provider=provider,
+            client_request_id=application.client_request_id,
+            iin=iin,
+            phone=phone,
+            partner=partner,
+            principal=principal,
+        )
+        fields = {
+            "prescoring_status": outcome.status,
+            "prescoring_score": Decimal(str(outcome.score)) if outcome.score is not None else None,
+            "prescoring_message": outcome.message,
+            "prescoring_max_limit": outcome.max_limit,
+            "prescoring_checked_at": outcome.checked_at,
+        }
+        try:
+            self._require_prescoring_outcome(provider, outcome, principal=principal)
+        except HTTPException as exc:
+            await self.repository.reject_application_on_prescoring_committed(
+                application_id=application.id, **fields
+            )
+            reason = self._extract_error_message(exc).rstrip(". ")
+            detail = (
+                f"Повторный прескоринг перед отправкой: {reason}. "
+                "Заявка закрыта — по сделке можно оформить новую."
+            )
+            await self._log_event(
+                "FF_APPLY_FAILED",
+                factoring_id=application.id,
+                source="FF_FACTORING",
+                committed=True,
+                payload={"error": detail, "stage": "prescoring_on_submit", "status": "REJECTED"},
+            )
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        await self.repository.update_application_prescoring(application_id=application.id, **fields)
 
     @staticmethod
     def _prescoring_timeout_sec(provider: FactoringProvider) -> float:
@@ -2434,6 +2507,7 @@ class FactoringService(BaseService):
             await self._log_event(
                 "PRESCORING_SKIPPED",
                 source="FF_FACTORING",
+                committed=True,
                 payload={"reason": "not_configured", "client_request_id": client_request_id},
             )
             return _PrescoringOutcome(None, None, None, None, True, None)
@@ -2457,9 +2531,12 @@ class FactoringService(BaseService):
             "partner": partner,
             "principal": int(principal),
         }
+        # committed: отказ прескоринга дальше превращается в 422 и откатывает
+        # транзакцию запроса — без этого в журнале остаются только одобрения.
         await self._log_event(
             "PRESCORING_REQUEST",
             source="FF_FACTORING",
+            committed=True,
             payload={
                 "client_request_id": client_request_id,
                 "uuid": request_uuid,
@@ -2483,6 +2560,7 @@ class FactoringService(BaseService):
             await self._log_event(
                 "PRESCORING_FAILED",
                 source="FF_FACTORING",
+                committed=True,
                 payload={
                     "client_request_id": client_request_id,
                     "uuid": request_uuid,
@@ -2515,6 +2593,7 @@ class FactoringService(BaseService):
         await self._log_event(
             "PRESCORING_RESULT",
             source="FF_FACTORING",
+            committed=True,
             payload={
                 "client_request_id": client_request_id,
                 "uuid": request_uuid,
