@@ -249,6 +249,67 @@ class FactoringRepository(BaseRepository):
             )
         )
 
+    async def update_application_prescoring(
+        self,
+        *,
+        application_id: int,
+        prescoring_status: str | None,
+        prescoring_score: Decimal | None,
+        prescoring_message: str | None,
+        prescoring_max_limit: Decimal | None,
+        prescoring_checked_at: datetime | None,
+        status: str | None = None,
+    ) -> None:
+        await self.execute(
+            """
+            UPDATE installment_application_tab
+            SET prescoring_status = $2,
+                prescoring_score = $3,
+                prescoring_message = $4,
+                prescoring_max_limit = $5,
+                prescoring_checked_at = $6,
+                status = coalesce($7, status),
+                updated_at = now()
+            WHERE id = $1
+              AND product_type = 'FACTORING'
+            """,
+            application_id,
+            prescoring_status,
+            prescoring_score,
+            prescoring_message,
+            prescoring_max_limit,
+            prescoring_checked_at,
+            status,
+        )
+
+    async def reject_application_on_prescoring_committed(
+        self,
+        *,
+        application_id: int,
+        prescoring_status: str | None,
+        prescoring_score: Decimal | None,
+        prescoring_message: str | None,
+        prescoring_max_limit: Decimal | None,
+        prescoring_checked_at: datetime | None,
+    ) -> None:
+        """Close the application on a separate connection: the service raises
+        422 right after, which rolls back the request transaction."""
+        from src.database.pool import get_db_pool
+
+        pool = await get_db_pool()
+        async with pool.acquire() as connection:
+            other = FactoringRepository(connection=connection)
+            async with connection.transaction():
+                await other.update_application_prescoring(
+                    application_id=application_id,
+                    prescoring_status=prescoring_status,
+                    prescoring_score=prescoring_score,
+                    prescoring_message=prescoring_message,
+                    prescoring_max_limit=prescoring_max_limit,
+                    prescoring_checked_at=prescoring_checked_at,
+                    status="REJECTED",
+                )
+
     async def insert_event_log(
         self,
         *,
