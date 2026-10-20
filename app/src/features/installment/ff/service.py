@@ -12,10 +12,10 @@ from asyncpg.exceptions import PostgresError
 from bcrypt import checkpw
 from fastapi import HTTPException, status
 from loguru import logger
-from src.exceptions import StoredProcedureError
-from src.service import BaseService
 
-from ..deal_guard import check_deal_client_request_state
+from src.exceptions import StoredProcedureError
+from src.shared.deal_guard import check_deal_client_request_state
+
 from ..schemas import (
     AllowedBankListResponse,
     AllowedBankResponse,
@@ -76,7 +76,7 @@ APPLY_UNKNOWN_DETAIL = (
 TOKEN_FALLBACK_TTL = timedelta(minutes=55)
 
 
-class FFService(BaseService):
+class FFService:
     def __init__(self, ff_repository: FFRepository, ff_client: FFClient, app_env: str) -> None:
         self.ff_repository = ff_repository
         self.ff_client = ff_client
@@ -117,7 +117,9 @@ class FFService(BaseService):
 
     async def sync_products(self) -> SyncProductsResponse:
         products_response = await self.get_products()
-        products_payload = [product.model_dump(mode="json") for product in products_response.products]
+        products_payload = [
+            product.model_dump(mode="json") for product in products_response.products
+        ]
         result = await self.ff_repository.sync_provider_products(
             provider_code="FF",
             products=products_payload,
@@ -256,7 +258,9 @@ class FFService(BaseService):
             raise mapped from exc
         except HTTPException as exc:
             # Login to the bank failed: the application itself never left us.
-            await self._mark_apply_failed(application_id, payload, error=self._extract_error_message(exc))
+            await self._mark_apply_failed(
+                application_id, payload, error=self._extract_error_message(exc)
+            )
             raise
 
         application_uuid = response_payload.get("uuid")
@@ -351,10 +355,7 @@ class FFService(BaseService):
                 detail=f"Application id={application_id} was not found.",
             )
 
-        if (
-            application.client_request_credit_detail_id is None
-            and application.status != "ISSUED"
-        ):
+        if application.client_request_credit_detail_id is None and application.status != "ISSUED":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Заявку можно применить к сделке только после выдачи (ISSUED)",
@@ -715,9 +716,12 @@ class FFService(BaseService):
                 polled += 1
                 if updated.status != row["status"]:
                     changed += 1
-                if updated.status == "ISSUED" and updated.client_request_credit_detail_id is not None:
+                if (
+                    updated.status == "ISSUED"
+                    and updated.client_request_credit_detail_id is not None
+                ):
                     applied += 1
-            except Exception as exc:  # noqa: BLE001 — one bad application must not stop the batch
+            except Exception as exc:
                 errors += 1
                 logger.warning(
                     "Installment reconcile failed | application_id={id} error={error}",
@@ -781,7 +785,9 @@ class FFService(BaseService):
 
         now = datetime.now(UTC)
         token_exp = self.ff_client.access_token_expires_at(access_token)
-        expires_at = token_exp if token_exp is not None and token_exp > now else now + TOKEN_FALLBACK_TTL
+        expires_at = (
+            token_exp if token_exp is not None and token_exp > now else now + TOKEN_FALLBACK_TTL
+        )
         await self.ff_repository.upsert_token(
             provider_id=provider.id,
             access_token=access_token,
@@ -1023,12 +1029,14 @@ class FFService(BaseService):
             return None
         try:
             return segno.make(url, error="m").svg_data_uri(scale=6, border=2)
-        except Exception as exc:  # noqa: BLE001 — a QR is a convenience, the link still works
+        except Exception as exc:
             logger.warning("QR render failed | error={error}", error=exc)
             return None
 
     @staticmethod
-    def _parse_basic_authorization_header(header_value: str | None) -> tuple[str | None, str | None]:
+    def _parse_basic_authorization_header(
+        header_value: str | None,
+    ) -> tuple[str | None, str | None]:
         if header_value is None or not header_value.startswith("Basic "):
             return None, None
 
@@ -1038,7 +1046,7 @@ class FFService(BaseService):
 
         try:
             decoded = base64.b64decode(token, validate=True).decode("utf-8")
-        except (binascii.Error, UnicodeDecodeError):
+        except binascii.Error, UnicodeDecodeError:
             return None, None
 
         if ":" not in decoded:
@@ -1135,7 +1143,7 @@ class FFService(BaseService):
         )
         try:
             await self.ff_repository.committed(lambda repo: repo.mark_apply_failed(application_id))
-        except Exception as mark_exc:  # noqa: BLE001
+        except Exception as mark_exc:
             logger.warning(
                 "Failed to mark APPLY_FAILED | application_id={id} error={error}",
                 id=application_id,
@@ -1158,7 +1166,7 @@ class FFService(BaseService):
         )
         try:
             await self.ff_repository.committed(lambda repo: repo.mark_apply_unknown(application_id))
-        except Exception as mark_exc:  # noqa: BLE001
+        except Exception as mark_exc:
             logger.warning(
                 "Failed to mark APPLY_UNKNOWN | application_id={id} error={error}",
                 id=application_id,
@@ -1213,7 +1221,8 @@ class FFService(BaseService):
             for key, item in value.items():
                 lowered = key.lower()
                 if (
-                    lowered in {
+                    lowered
+                    in {
                         "iin",
                         "mobile_phone",
                         "phone",

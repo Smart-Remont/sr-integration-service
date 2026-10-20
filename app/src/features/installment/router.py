@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request, status
+
 from src.integration_context.constants import SCOPE_INSTALLMENT
 from src.integration_context.deps import IntegrationContextDep
 from src.integration_context.helpers import employee_id_from_context
@@ -32,7 +33,9 @@ from .schemas import (
     WebhookAckResponse,
 )
 
-router = APIRouter(prefix=api_prefix_config.v1.installment_ff, tags=["Installment (Freedom Finance)"])
+router = APIRouter(
+    prefix=api_prefix_config.v1.installment_ff, tags=["Installment (Freedom Finance)"]
+)
 
 
 @router.get(

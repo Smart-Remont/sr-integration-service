@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from fastapi import HTTPException
+
 from src.features.installment.ff.client import FFClient, FFClientError
 from src.features.installment.ff.repo import (
     FFProvider,
@@ -89,9 +90,7 @@ def _service() -> FFService:
     repo.apply_application_to_deal = AsyncMock(return_value=555)
     repo.get_token = AsyncMock(return_value=None)
     repo.upsert_token = AsyncMock()
-    repo.get_active_credentials = AsyncMock(
-        return_value=MagicMock(username="u", password="p")
-    )
+    repo.get_active_credentials = AsyncMock(return_value=MagicMock(username="u", password="p"))
 
     async def _committed(action):
         return await action(repo)
@@ -107,8 +106,7 @@ def _service() -> FFService:
 
 def _events(svc: FFService) -> list[str]:
     return [
-        call.kwargs["event_type"]
-        for call in svc.ff_repository.insert_event_log.await_args_list
+        call.kwargs["event_type"] for call in svc.ff_repository.insert_event_log.await_args_list
     ]
 
 
@@ -215,18 +213,14 @@ def _hook(**overrides) -> dict:
     return payload
 
 
-def _found(
-    status: str = "APPROVED", approved_params: dict | None = None
-) -> FFWebhookApplication:
+def _found(status: str = "APPROVED", approved_params: dict | None = None) -> FFWebhookApplication:
     return FFWebhookApplication(id=101, status=status, approved_params=approved_params)
 
 
 @pytest.mark.asyncio
 async def test_webhook_keeps_borrower_and_contract():
     svc = _service()
-    svc.ff_repository.get_application_by_reference_or_uuid = AsyncMock(
-        return_value=_found()
-    )
+    svc.ff_repository.get_application_by_reference_or_uuid = AsyncMock(return_value=_found())
     svc.ff_repository.get_application_by_id = AsyncMock(
         side_effect=[
             _application(),
@@ -267,9 +261,7 @@ async def test_webhook_drops_bank_placeholders():
         authorization_header="Basic x",
     )
 
-    params = svc.ff_repository.update_application_from_webhook.await_args.kwargs[
-        "approved_params"
-    ]
+    params = svc.ff_repository.update_application_from_webhook.await_args.kwargs["approved_params"]
     for key in ("iin", "mobile_phone", "first_name", "last_name", "middle_name"):
         assert key not in params
 
@@ -280,13 +272,9 @@ async def test_webhook_unknown_status_is_acked_without_update():
     svc.ff_repository.get_application_by_reference_or_uuid = AsyncMock(
         return_value=_found("ISSUED")
     )
-    svc.ff_repository.get_application_by_id = AsyncMock(
-        return_value=_application(status="ISSUED")
-    )
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=_application(status="ISSUED"))
 
-    ack = await svc.handle_webhook(
-        _hook(status="PARTIAL_REFUND"), authorization_header="Basic x"
-    )
+    ack = await svc.handle_webhook(_hook(status="PARTIAL_REFUND"), authorization_header="Basic x")
 
     assert ack.ok
     svc.ff_repository.update_application_from_webhook.assert_not_awaited()
@@ -299,9 +287,7 @@ async def test_webhook_repeat_is_duplicate():
     hook = _hook(status="APPROVED")
     stored = svc._bank_params(hook, params_key="approved_params")
     svc.ff_repository.get_application_by_reference_or_uuid = AsyncMock(
-        return_value=_found(
-            "APPROVED", approved_params={**stored, "extra_from_poll": 1}
-        )
+        return_value=_found("APPROVED", approved_params={**stored, "extra_from_poll": 1})
     )
     svc.ff_repository.get_application_by_id = AsyncMock(
         return_value=_application(status="APPROVED")
@@ -319,19 +305,14 @@ async def test_webhook_does_not_reopen_issued():
     svc.ff_repository.get_application_by_reference_or_uuid = AsyncMock(
         return_value=_found("ISSUED")
     )
-    svc.ff_repository.get_application_by_id = AsyncMock(
-        return_value=_application(status="ISSUED")
-    )
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=_application(status="ISSUED"))
 
     await svc.handle_webhook(
         _hook(status="REJECTED", credit_contract="NEW-1"),
         authorization_header="Basic x",
     )
 
-    assert (
-        svc.ff_repository.update_application_from_webhook.await_args.kwargs["status"]
-        == "ISSUED"
-    )
+    assert svc.ff_repository.update_application_from_webhook.await_args.kwargs["status"] == "ISSUED"
 
 
 # --- reconcile --------------------------------------------------------------
@@ -476,14 +457,10 @@ def test_server_error_may_have_reached_bank():
 
 def test_access_token_expiry_from_jwt():
     exp = int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())
-    claims = (
-        base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
-    )
+    claims = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
     token = f"header.{claims}.signature"
 
-    assert FFClient.access_token_expires_at(token) == datetime.fromtimestamp(
-        exp, tz=UTC
-    )
+    assert FFClient.access_token_expires_at(token) == datetime.fromtimestamp(exp, tz=UTC)
     assert FFClient.access_token_expires_at("not-a-jwt") is None
 
 

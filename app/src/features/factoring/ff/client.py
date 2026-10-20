@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -16,7 +16,7 @@ class FactoringClientError(Exception):
 class FactoringClient:
     """HTTP client for Freedom FFC2 factoring endpoints."""
 
-    _DEFAULT_HEADERS = {
+    _DEFAULT_HEADERS: ClassVar[dict[str, str]] = {
         "Accept": "application/json",
         "User-Agent": "SmartRemont-integrations-sr/1.0",
     }
@@ -220,7 +220,9 @@ class FactoringClient:
         return self._parse_response(response, resolve_ip=resolve_ip)
 
     @staticmethod
-    def _parse_response(response: httpx.Response, *, resolve_ip: str | None = None) -> dict[str, Any]:
+    def _parse_response(
+        response: httpx.Response, *, resolve_ip: str | None = None
+    ) -> dict[str, Any]:
         try:
             payload = response.json()
         except ValueError:
@@ -274,7 +276,9 @@ class FactoringClient:
             masked: dict[str, Any] = {}
             for key, value in body.items():
                 key_lower = key.lower() if isinstance(key, str) else ""
-                if any(marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")):
+                if any(
+                    marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")
+                ):
                     masked[key] = "***"
                 elif (
                     key_lower in ("document", "digital_signature", "public_key", "file_content")

@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING
 
 from fastapi.responses import JSONResponse
-from src.service import BaseService
 
 from ..errors import BigIntegrationDatabaseError
 from ..responses import big_integration_error_response, big_integration_success_response
@@ -10,8 +9,8 @@ if TYPE_CHECKING:
     from .repo import RequestCreateV3Repository
 
 
-class RequestCreateV3Service(BaseService):
-    def __init__(self, repository: "RequestCreateV3Repository") -> None:
+class RequestCreateV3Service:
+    def __init__(self, repository: RequestCreateV3Repository) -> None:
         self.repository = repository
 
     async def request_create_v3(self, body: dict[str, object]) -> JSONResponse:

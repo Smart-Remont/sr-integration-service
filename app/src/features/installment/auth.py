@@ -1,38 +1,10 @@
-from secrets import compare_digest
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends
+
 from src.config import installment_auth_config
-
-security = HTTPBasic()
-
-
-def verify_installment_basic_auth(
-    credentials: Annotated[HTTPBasicCredentials, Depends(security)],
-) -> None:
-    if not (installment_auth_config.username and installment_auth_config.password):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Installment API credentials are not configured.",
-        )
-    username_ok = compare_digest(
-        credentials.username.encode(),
-        installment_auth_config.username.encode(),
-    )
-    password_ok = compare_digest(
-        credentials.password.encode(),
-        installment_auth_config.password.encode(),
-    )
-    if not (username_ok and password_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-
+from src.security import basic_auth_dependency
 
 InstallmentBasicAuthDep = Annotated[
-    None,
-    Depends(verify_installment_basic_auth),
+    None, Depends(basic_auth_dependency(installment_auth_config, api_name="Installment"))
 ]

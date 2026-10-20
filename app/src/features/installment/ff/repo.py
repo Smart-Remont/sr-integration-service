@@ -2,16 +2,12 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any
 
-from src.features.big_integration.db import scalar_from_sp_rows
-from src.repository import BaseRepository
+from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.deal_guard import fetch_deal_client_request_state
 
-from ..deal_guard import fetch_deal_client_request_state
 from ..schemas import InstallmentApplicationResponse
-
-T = TypeVar("T")
 
 
 @dataclass(slots=True, frozen=True)
@@ -58,21 +54,6 @@ class FFAllowedBank:
 
 
 class FFRepository(BaseRepository):
-    async def committed(self, action: Callable[["FFRepository"], Awaitable[T]]) -> T:
-        """Run `action` on its own connection and commit it right away.
-
-        The request runs in one transaction that rolls back on any HTTP error.
-        The application row must be committed before the bank is called (the
-        bank's hook may come at once, and a timeout must not erase the row the
-        bank already knows by reference_id); marks and the event log must
-        survive the error the request then returns."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            async with connection.transaction():
-                return await action(FFRepository(connection=connection))
-
     async def get_provider_by_code(self, code: str) -> FFProvider | None:
         rows = await self.call_sp(
             "public.installment__provider_get",
@@ -286,7 +267,9 @@ class FFRepository(BaseRepository):
             result.append(InstallmentApplicationResponse.model_validate(payload))
         return result
 
-    async def get_application_by_id(self, application_id: int) -> InstallmentApplicationResponse | None:
+    async def get_application_by_id(
+        self, application_id: int
+    ) -> InstallmentApplicationResponse | None:
         rows = await self.call_sp(
             "public.installment__application_get",
             application_id,
@@ -335,7 +318,9 @@ class FFRepository(BaseRepository):
     async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
         return await fetch_deal_client_request_state(self, client_request_id)
 
-    async def get_provider_webhook_credentials(self, code: str = "FF") -> FFWebhookCredential | None:
+    async def get_provider_webhook_credentials(
+        self, code: str = "FF"
+    ) -> FFWebhookCredential | None:
         rows = await self.call_sp(
             "public.installment__provider_webhook_credentials_get",
             code,

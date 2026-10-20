@@ -6,9 +6,9 @@ from fastapi import HTTPException
 
 from src.features.factoring.ff.service import FactoringService
 from src.features.factoring.schemas import PrescoringFactoringRequest
-from src.features.installment.deal_guard import check_deal_client_request_state
 from src.features.installment.ff.service import FFService
 from src.features.installment.schemas import CreateInstallmentApplicationRequest
+from src.shared.deal_guard import check_deal_client_request_state
 
 
 def test_main_confirmed_request_passes():

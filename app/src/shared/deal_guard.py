@@ -6,6 +6,7 @@ or that is later cancelled together with a non-main request."""
 from typing import Any
 
 from fastapi import HTTPException, status
+
 from src.repository import BaseRepository
 
 CLOSED_CLIENT_REQUEST_STATUSES = frozenset({"CANCEL", "TERMINATED"})
@@ -30,9 +31,7 @@ async def fetch_deal_client_request_state(
     return dict(row) if row is not None else None
 
 
-def check_deal_client_request_state(
-    state: dict[str, Any] | None, client_request_id: int
-) -> None:
+def check_deal_client_request_state(state: dict[str, Any] | None, client_request_id: int) -> None:
     if state is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -59,7 +58,6 @@ def check_deal_client_request_state(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Заявка {client_request_id} в статусе {status_code}: "
-                "оформление по ней недоступно."
+                f"Заявка {client_request_id} в статусе {status_code}: оформление по ней недоступно."
             ),
         )

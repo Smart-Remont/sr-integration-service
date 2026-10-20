@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import status
 from fastapi.responses import JSONResponse
-from src.service import BaseService
 
 from ..errors import BigIntegrationDatabaseError
 from ..responses import big_integration_error_response, big_integration_success_response
@@ -11,8 +10,8 @@ if TYPE_CHECKING:
     from .repo import DduFlatInfoMultipleRepository
 
 
-class DduFlatInfoMultipleService(BaseService):
-    def __init__(self, repository: "DduFlatInfoMultipleRepository") -> None:
+class DduFlatInfoMultipleService:
+    def __init__(self, repository: DduFlatInfoMultipleRepository) -> None:
         self.repository = repository
 
     async def ddu_flat_info_multiple(self, body: dict[str, object]) -> JSONResponse:

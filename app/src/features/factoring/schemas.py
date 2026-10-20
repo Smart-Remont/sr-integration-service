@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import ConfigDict, Field
+
 from src.schema import BaseSchema
 
 from .openapi_examples import (

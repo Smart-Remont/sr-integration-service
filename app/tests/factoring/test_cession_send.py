@@ -41,16 +41,24 @@ def _item(item_id: int) -> CessionBatchItem:
     )
 
 
-def _service(*, marked: int | None = None, used_numbers: list[str] | None = None) -> FactoringService:
+def _service(
+    *, marked: int | None = None, used_numbers: list[str] | None = None
+) -> FactoringService:
     items = [_item(6)]
     repository = MagicMock()
     repository.list_cession_batch = AsyncMock(return_value=items)
     repository.get_provider_by_code = AsyncMock(
-        return_value=FactoringProvider(id=1, code="FF_FACTORING", base_url="https://bank", config=CONFIG)
+        return_value=FactoringProvider(
+            id=1, code="FF_FACTORING", base_url="https://bank", config=CONFIG
+        )
     )
-    repository.get_cession_company = AsyncMock(return_value={"company_name_official": "ТОО «Smart Remont South»"})
+    repository.get_cession_company = AsyncMock(
+        return_value={"company_name_official": "ТОО «Smart Remont South»"}
+    )
     repository.list_cession_contract_numbers = AsyncMock(return_value=used_numbers or [])
-    repository.mark_cession_sent_committed = AsyncMock(return_value=len(items) if marked is None else marked)
+    repository.mark_cession_sent_committed = AsyncMock(
+        return_value=len(items) if marked is None else marked
+    )
     repository.unmark_cession_sent_committed = AsyncMock(return_value=len(items))
 
     mynca = MagicMock()
@@ -74,14 +82,17 @@ def _request(**overrides) -> SendCessionRequest:
 
 
 def _logged(service: FactoringService, event_type: str) -> list[dict]:
-    return [c.kwargs["payload"] for c in service._log_event.await_args_list if c.args[0] == event_type]
+    return [
+        c.kwargs["payload"] for c in service._log_event.await_args_list if c.args[0] == event_type
+    ]
 
 
 @pytest.mark.asyncio
 async def test_bank_rejection_unmarks_on_committed_connection() -> None:
     service = _service()
     service.client.send_cession.side_effect = FactoringClientError(
-        status_code=400, detail='HTTP 400: {"description":"Не удалось отправить запрос в Freedom Front"}'
+        status_code=400,
+        detail='HTTP 400: {"description":"Не удалось отправить запрос в Freedom Front"}',
     )
 
     with pytest.raises(HTTPException) as exc:
@@ -111,7 +122,9 @@ async def test_unknown_outcome_keeps_mark_to_avoid_double_send() -> None:
 @pytest.mark.asyncio
 async def test_auth_failure_before_mark_sends_nothing() -> None:
     service = _service()
-    service._ensure_valid_token.side_effect = FactoringClientError(status_code=400, detail="bad credentials")
+    service._ensure_valid_token.side_effect = FactoringClientError(
+        status_code=400, detail="bad credentials"
+    )
 
     with pytest.raises(HTTPException):
         await service.send_daily_cession(_request())
@@ -184,7 +197,9 @@ async def test_sent_by_is_audited_but_never_sent_to_bank() -> None:
 @pytest.mark.asyncio
 async def test_sent_by_is_audited_on_bank_rejection() -> None:
     service = _service()
-    service.client.send_cession.side_effect = FactoringClientError(status_code=400, detail="HTTP 400: no")
+    service.client.send_cession.side_effect = FactoringClientError(
+        status_code=400, detail="HTTP 400: no"
+    )
 
     with pytest.raises(HTTPException):
         await service.send_daily_cession(_request(sent_by=2543))

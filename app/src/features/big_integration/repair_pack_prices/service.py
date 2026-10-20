@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import status
 from fastapi.responses import JSONResponse
-from src.service import BaseService
 
 from ..errors import BigIntegrationDatabaseError
 from ..responses import big_integration_error_response, big_integration_success_response
@@ -14,8 +13,8 @@ _MAX_PLACEMENT_UUIDS = 10_000
 _NOT_FOUND_ERROR = "Подходящий пакет не найден"
 
 
-class RepairPackPricesService(BaseService):
-    def __init__(self, repository: "RepairPackPricesRepository") -> None:
+class RepairPackPricesService:
+    def __init__(self, repository: RepairPackPricesRepository) -> None:
         self.repository = repository
 
     async def repair_pack_prices(self, body: dict[str, object]) -> JSONResponse:

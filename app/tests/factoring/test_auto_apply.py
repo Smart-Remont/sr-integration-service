@@ -67,9 +67,7 @@ async def test_auto_apply_logs_failure_without_raising():
 
     await svc._try_auto_apply_on_issued(38)  # must not raise
 
-    events = [
-        call.kwargs["event_type"] for call in svc.repository.insert_event_log.await_args_list
-    ]
+    events = [call.kwargs["event_type"] for call in svc.repository.insert_event_log.await_args_list]
     assert "AUTO_APPLY_FAILED" in events
 
 

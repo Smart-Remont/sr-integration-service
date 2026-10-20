@@ -15,7 +15,9 @@ CONFIG = {
 
 
 def _provider(config: dict | None = None) -> FactoringProvider:
-    return FactoringProvider(id=1, code="FF_FACTORING", base_url="https://example.test/", config=config or CONFIG)
+    return FactoringProvider(
+        id=1, code="FF_FACTORING", base_url="https://example.test/", config=config or CONFIG
+    )
 
 
 def _service(
@@ -29,7 +31,10 @@ def _service(
     repository.get_cession_company = AsyncMock(
         return_value=company
         if company is not None
-        else {"company_name_official": "ТОО «Smart Remont Azure»", "director_fio": "Усембекова Шынар Сериковна"}
+        else {
+            "company_name_official": "ТОО «Smart Remont Azure»",
+            "director_fio": "Усембекова Шынар Сериковна",
+        }
     )
     repository.get_template_by_code = AsyncMock(
         return_value=template if template is not None else {"template_path": "/documents/x.docx"}
@@ -78,7 +83,9 @@ async def test_notification_context_requires_framework_contract():
 
 @pytest.mark.asyncio
 async def test_notification_context_requires_director():
-    svc = _service(company={"company_name_official": "ТОО «Smart Remont Azure»", "director_fio": ""})
+    svc = _service(
+        company={"company_name_official": "ТОО «Smart Remont Azure»", "director_fio": ""}
+    )
 
     with pytest.raises(HTTPException) as exc:
         await svc._require_notification_context(_provider(), 1)

@@ -1,7 +1,7 @@
 import base64
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -20,7 +20,7 @@ class FFClientError(Exception):
 
 
 class FFClient:
-    _DEFAULT_HEADERS = {
+    _DEFAULT_HEADERS: ClassVar[dict[str, str]] = {
         "Accept": "application/json",
         "User-Agent": "SmartRemont-integrations-sr/1.0",
     }
@@ -73,9 +73,13 @@ class FFClient:
         access = response.get("access")
         refresh = response.get("refresh")
         if not isinstance(access, str) or not access:
-            raise FFClientError(status_code=502, detail="Freedom Finance did not return access token.")
+            raise FFClientError(
+                status_code=502, detail="Freedom Finance did not return access token."
+            )
         if refresh is not None and not isinstance(refresh, str):
-            raise FFClientError(status_code=502, detail="Freedom Finance returned invalid refresh token.")
+            raise FFClientError(
+                status_code=502, detail="Freedom Finance returned invalid refresh token."
+            )
         return access, refresh
 
     async def get_partner_info(
@@ -179,7 +183,9 @@ class FFClient:
         except httpx.RequestError as exc:
             # Connect/pool errors happen before the request leaves us; anything
             # later (read timeout, dropped connection) may have reached the bank.
-            not_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+            not_sent = isinstance(
+                exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+            )
             logger.error(
                 "FF HTTP transport error | connect_url={url} error={error} maybe_sent={maybe_sent}",
                 url=connect_url,
@@ -201,7 +207,9 @@ class FFClient:
         return self._parse_response(response, resolve_ip=resolve_ip)
 
     @staticmethod
-    def _parse_response(response: httpx.Response, *, resolve_ip: str | None = None) -> dict[str, Any]:
+    def _parse_response(
+        response: httpx.Response, *, resolve_ip: str | None = None
+    ) -> dict[str, Any]:
         try:
             payload = response.json()
         except ValueError:
@@ -275,7 +283,7 @@ class FFClient:
             exp = claims.get("exp") if isinstance(claims, dict) else None
             if isinstance(exp, (int, float)) and exp > 0:
                 return datetime.fromtimestamp(exp, tz=UTC)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return None
         return None
 
@@ -299,7 +307,9 @@ class FFClient:
             masked: dict[str, Any] = {}
             for key, value in body.items():
                 key_lower = key.lower() if isinstance(key, str) else ""
-                if any(marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")):
+                if any(
+                    marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")
+                ):
                     masked[key] = "***"
                 elif (
                     key_lower in ("document", "digital_signature", "public_key", "file_content")

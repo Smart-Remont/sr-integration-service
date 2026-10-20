@@ -8,7 +8,10 @@ from fastapi import HTTPException
 from src.features.factoring.ff.client import FactoringClientError
 from src.features.factoring.ff.repo import FactoringProvider
 from src.features.factoring.ff.service import FactoringService
-from src.features.factoring.schemas import FactoringApplicationResponse, SubmitFactoringApplicationRequest
+from src.features.factoring.schemas import (
+    FactoringApplicationResponse,
+    SubmitFactoringApplicationRequest,
+)
 
 CONFIG = {
     "prescoring_required": True,
@@ -45,11 +48,15 @@ def _application(*, checked_ago: timedelta, **overrides) -> FactoringApplication
     return FactoringApplicationResponse(**defaults)
 
 
-def _service(application: FactoringApplicationResponse, prescoring: dict | Exception) -> FactoringService:
+def _service(
+    application: FactoringApplicationResponse, prescoring: dict | Exception
+) -> FactoringService:
     repository = MagicMock()
     repository.get_application_by_id = AsyncMock(return_value=application)
     repository.get_provider_by_code = AsyncMock(
-        return_value=FactoringProvider(id=1, code="FF_FACTORING", base_url="https://bank", config=CONFIG)
+        return_value=FactoringProvider(
+            id=1, code="FF_FACTORING", base_url="https://bank", config=CONFIG
+        )
     )
     repository.get_provider_webhook_credentials = AsyncMock(return_value=MagicMock())
     repository.update_application_prescoring = AsyncMock()

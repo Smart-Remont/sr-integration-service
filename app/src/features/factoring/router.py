@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
+
 from src.integration_context.constants import SCOPE_FACTORING
 from src.integration_context.deps import IntegrationContextDep
 from src.integration_context.helpers import employee_id_from_context
@@ -16,6 +17,7 @@ from .openapi_examples import (
     WEBHOOK_ACK_RESPONSES,
 )
 from .schemas import (
+    CessionPreviewRequest,
     CreateFactoringApplicationResponse,
     CreateFactoringRefundRequest,
     FactoringApplicationListResponse,
@@ -28,7 +30,6 @@ from .schemas import (
     PrepareFactoringDocumentsResponse,
     PrescoringFactoringRequest,
     PrescoringFactoringResponse,
-    CessionPreviewRequest,
     SendCessionRequest,
     SendCessionResponse,
     SubmitFactoringApplicationRequest,
@@ -182,16 +183,16 @@ async def download_print_form(
     description=(
         "Вызывает **MyNCA** (`back_url`). **Auth:** нет.\n\n"
         "Одиночная подпись: `status=SUCCESS`, ИИН из `dn_name` сверяется с ИИН заявки. "
-        "Несовпадение — `{\"status\": false, \"error\": ...}`, MyNCA откатывает подпись.\n\n"
+        'Несовпадение — `{"status": false, "error": ...}`, MyNCA откатывает подпись.\n\n'
         "Batch (`POST /sign/batch/create`, `atomic: true`): в теле `documents[]`. "
-        "Ответ — `{\"status\": \"success\", \"documents\": [{\"sign_process_id\", \"status\": \"ok\"|\"error\"}]}`. "
+        'Ответ — `{"status": "success", "documents": [{"sign_process_id", "status": "ok"|"error"}]}`. '
         "Ошибочный документ откатывает весь пакет."
     ),
 )
 async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONResponse:
     try:
         body = await request.json()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return JSONResponse(
             {"status": False, "error": "Невалидный JSON в callback"},
             status_code=400,
@@ -203,7 +204,7 @@ async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONR
         )
     try:
         payload = await service.handle_sign_callback(body)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("factoring sign-callback failed")
         return JSONResponse(
             {"status": False, "error": "Не удалось проверить ИИН подписанта"},
@@ -271,7 +272,9 @@ async def get_application(
     context: IntegrationContextDep,
     application_id: Annotated[
         int,
-        Path(description="ID в installment_application_tab (product_type = FACTORING)", examples=[1]),
+        Path(
+            description="ID в installment_application_tab (product_type = FACTORING)", examples=[1]
+        ),
     ],
     service: FactoringServiceDep,
 ) -> FactoringApplicationResponse:
@@ -350,6 +353,4 @@ async def webhook_factoring_refund(
     if body.__pydantic_extra__:
         payload.update(body.__pydantic_extra__)
     authorization_header = request.headers.get("Authorization")
-    return await service.handle_refund_webhook(
-        payload, authorization_header=authorization_header
-    )
+    return await service.handle_refund_webhook(payload, authorization_header=authorization_header)

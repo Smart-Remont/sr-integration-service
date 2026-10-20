@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends
+
 from src.config import app_config, factoring_prescoring_config, mynca_config
 from src.database.deps import DatabaseConnectionDep
 

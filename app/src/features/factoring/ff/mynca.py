@@ -54,7 +54,7 @@ class MyncaClient:
             import base64
 
             return base64.b64decode(pdf_b64)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise MyncaClientError("MyNCA docx-to-pdf returned invalid PDF.") from exc
 
     async def sign_create(
@@ -184,7 +184,7 @@ class MyncaClient:
             import base64
 
             return base64.b64decode(cms_b64)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise MyncaClientError("MyNCA cms/sign returned invalid CMS.") from exc
 
     async def cms_sign_save(
@@ -288,9 +288,7 @@ class MyncaClient:
     async def _request_bytes(self, method: str, path: str) -> bytes:
         response = await self._request(method, path, json=None)
         if response.status_code >= 400:
-            raise MyncaClientError(
-                f"MyNCA {path} failed (HTTP {response.status_code})."
-            )
+            raise MyncaClientError(f"MyNCA {path} failed (HTTP {response.status_code}).")
         content_type = response.headers.get("content-type", "")
         if "application/json" in content_type:
             body = response.json()
@@ -368,7 +366,9 @@ def parse_sign_batch_response(
             {
                 "file_name": file_name.strip() if isinstance(file_name, str) else None,
                 "sign_process_id": sign_process_id.strip(),
-                "group_id": group_id.strip() if isinstance(group_id, str) and group_id.strip() else None,
+                "group_id": group_id.strip()
+                if isinstance(group_id, str) and group_id.strip()
+                else None,
             }
         )
     return sign_url.strip(), parsed

@@ -118,7 +118,9 @@ def sign_integration_context(
         "iat": now,
         "exp": now + ttl_seconds,
     }
-    header = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    header = _b64url_encode(
+        json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode()
+    )
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
     signing_input = f"{header}.{body}".encode()
     signature = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()

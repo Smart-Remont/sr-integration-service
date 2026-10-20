@@ -26,14 +26,15 @@ from .infra import (
 _PG_RAISE_MESSAGE_RE = re.compile(r"\{([^}]*)\}")
 
 
-def clean_postgres_raise_message(exc: Exception) -> str:
+def postgres_raise_message(exc: BaseException) -> str:
+    """Text inside ``{...}`` of a stored function ``RAISE EXCEPTION '{...}'``, else the raw text."""
     text = str(exc)
     match = _PG_RAISE_MESSAGE_RE.search(text)
-    return match.group(1).strip() if match else text
+    return match.group(1) if match else text
 
 
 @contextmanager
-def map_asyncpg_errors() -> Generator[None, None, None]:
+def map_asyncpg_errors() -> Generator[None]:
     try:
         yield
 
@@ -58,5 +59,5 @@ def map_asyncpg_errors() -> Generator[None, None, None]:
     except PostgresError as e:
         sqlstate = getattr(e, "sqlstate", None)
         if sqlstate == "P0001" or _PG_RAISE_MESSAGE_RE.search(str(e)):
-            raise StoredProcedureError(clean_postgres_raise_message(e)) from e
+            raise StoredProcedureError(postgres_raise_message(e).strip()) from e
         raise UnexpectedDatabaseError() from e

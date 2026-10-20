@@ -1,8 +1,6 @@
-import re
-
 from asyncpg.exceptions import PostgresError
 
-_PG_RAISE_MESSAGE_RE = re.compile(r"\{([^}]*)\}")
+from src.exceptions.db import postgres_raise_message
 
 
 class BigIntegrationDatabaseError(Exception):
@@ -11,18 +9,10 @@ class BigIntegrationDatabaseError(Exception):
         super().__init__(message)
 
 
-def clean_postgres_error_message(exc: PostgresError) -> str:
-    text = str(exc)
-    match = _PG_RAISE_MESSAGE_RE.search(text)
-    if match:
-        return match.group(1)
-    return text
-
-
 def to_big_integration_database_error(exc: Exception) -> BigIntegrationDatabaseError:
     cause: BaseException | None = exc
     while cause is not None:
         if isinstance(cause, PostgresError):
-            return BigIntegrationDatabaseError(clean_postgres_error_message(cause))
+            return BigIntegrationDatabaseError(postgres_raise_message(cause))
         cause = cause.__cause__
     return BigIntegrationDatabaseError(str(exc))

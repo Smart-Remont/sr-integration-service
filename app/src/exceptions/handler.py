@@ -78,14 +78,15 @@ def register_infrastructure_handlers(app: FastAPI) -> None:
 
         @app.exception_handler(exc_type)
         async def handler(
-            _request: Request,
+            request: Request,
             exc: InfrastructureError,
             response: ErrorResponse = response,
         ) -> JSONResponse:
-            logger.exception(
-                "%s: %s",
-                type(exc).__name__,
-                exc,
+            logger.opt(exception=exc).error(
+                "{error_type} on {method} {path}",
+                error_type=type(exc).__name__,
+                method=request.method,
+                path=request.url.path,
             )
 
             return _json_error(

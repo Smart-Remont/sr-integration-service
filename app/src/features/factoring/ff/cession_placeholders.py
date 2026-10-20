@@ -356,7 +356,9 @@ def surname_genitive_ru(surname: str, *, female: bool) -> str:
         return surname
     if lower.endswith(("ский", "цкий")):
         return surname[:-2] + "ого"
-    if lower.endswith(("ов", "ев", "ёв", "ин", "ын")) or re.search(r"[бвгджзклмнпрстфхцчшщ]$", lower):
+    if lower.endswith(("ов", "ев", "ёв", "ин", "ын")) or re.search(
+        r"[бвгджзклмнпрстфхцчшщ]$", lower
+    ):
         return surname + "а"
     return surname
 
@@ -394,7 +396,7 @@ def parse_discount_by_period(raw: Any) -> dict[int, Decimal]:
         try:
             period = int(key)
             rate = Decimal(str(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if period > 0 and rate >= 0:
             parsed[period] = rate
@@ -408,7 +410,7 @@ def allowed_periods(config: dict[str, Any] | None) -> list[int]:
         for item in raw:
             try:
                 period = int(item)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if period > 0:
                 periods.append(period)
@@ -564,7 +566,9 @@ def build_cession_placeholders(
         "valid_from_date": issue_date.strftime("%d.%m.%Y"),
         "client_basis_ru": basis_ru,
         "client_basis_kz": basis_kz,
-        "client_signer_position_ru_gen": str(config.get("position_ru_gen") or DEFAULT_SIGNER_POSITION_RU_GEN),
+        "client_signer_position_ru_gen": str(
+            config.get("position_ru_gen") or DEFAULT_SIGNER_POSITION_RU_GEN
+        ),
         "client_signer_position_kz": str(config.get("position_kz") or DEFAULT_SIGNER_POSITION_KZ),
         "client_signer_short_ru": names["short_ru"],
         "client_signer_short_ru_gen": str(config.get("fio_ru_gen") or names["short_ru_gen"]),

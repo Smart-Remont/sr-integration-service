@@ -13,7 +13,9 @@ class FileUploadResponse(BaseSchema):
         description="Относительный путь в хранилище (`/documents/...`), как в БД smremont",
         examples=[UPLOAD_RESPONSE["path"]],
     )
-    ext: str = Field(description="Расширение файла (lowercase), как PHP `file_ext`", examples=["jpg"])
+    ext: str = Field(
+        description="Расширение файла (lowercase), как PHP `file_ext`", examples=["jpg"]
+    )
     file_url: str = Field(
         description="Публичный URL: `STORAGE_PUBLIC_URL` + `path`",
         examples=[UPLOAD_RESPONSE["fileUrl"]],
@@ -38,7 +40,9 @@ class FileStoreModesResponse(BaseSchema):
 
 
 class FileStoreConfigResponse(BaseSchema):
-    minio_configured: bool = Field(description="Заданы MINIO_ENDPOINT, ACCESS_KEY, SECRET_KEY, BUCKET")
+    minio_configured: bool = Field(
+        description="Заданы MINIO_ENDPOINT, ACCESS_KEY, SECRET_KEY, BUCKET"
+    )
     public_base_url: str = Field(examples=[CONFIG_RESPONSE["publicBaseUrl"]])
     minio_endpoint: str | None = Field(default=None, description="MINIO_ENDPOINT (без секретов)")
     minio_bucket: str | None = Field(default=None, description="MINIO_BUCKET")

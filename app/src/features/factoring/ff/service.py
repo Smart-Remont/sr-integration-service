@@ -14,13 +14,14 @@ from zoneinfo import ZoneInfo
 from bcrypt import checkpw
 from fastapi import HTTPException, status
 from loguru import logger
+
 from src.exceptions import StoredProcedureError
-from src.features.installment.deal_guard import check_deal_client_request_state
-from src.service import BaseService
+from src.shared.deal_guard import check_deal_client_request_state
 
 from ..schemas import (
     CessionApplicationItem,
     CessionBatchResult,
+    CessionPreviewRequest,
     CreateFactoringApplicationRequest,
     CreateFactoringApplicationResponse,
     CreateFactoringRefundRequest,
@@ -33,21 +34,10 @@ from ..schemas import (
     PrescoringFactoringRequest,
     PrescoringFactoringResponse,
     PrintFormItem,
-    CessionPreviewRequest,
     SendCessionRequest,
     SendCessionResponse,
     SubmitFactoringApplicationRequest,
     WebhookAckResponse,
-)
-from .client import FactoringClient, FactoringClientError
-from .docx_fill import fill_docx_bytes
-from .mynca import MyncaClient, MyncaClientError
-from .repo import (
-    PROVIDER_CODE,
-    CessionBatchItem,
-    FactoringProvider,
-    FactoringRepository,
-    FactoringWebhookCredential,
 )
 from .cession_placeholders import (
     allowed_periods,
@@ -57,10 +47,20 @@ from .cession_placeholders import (
     build_cession_placeholders,
     parse_discount_by_period,
 )
+from .client import FactoringClient, FactoringClientError
+from .docx_fill import fill_docx_bytes
 from .limits import (
     parse_prescoring_max_limit,
     parse_principal_limits,
     phone_for_prescoring,
+)
+from .mynca import MyncaClient, MyncaClientError
+from .repo import (
+    PROVIDER_CODE,
+    CessionBatchItem,
+    FactoringProvider,
+    FactoringRepository,
+    FactoringWebhookCredential,
 )
 from .templates import PRINT_FORM_SPECS, fetch_template_bytes
 
@@ -97,7 +97,7 @@ class _NotificationContext:
     framework_date: date
 
 
-class FactoringService(BaseService):
+class FactoringService:
     def __init__(
         self,
         repository: FactoringRepository,
@@ -188,7 +188,9 @@ class FactoringService(BaseService):
         await self._require_deal_budget(request.client_request_id, request.principal)
 
         self._require_allowed_period(provider, request.period)
-        product_id = request.product_id or self._required_config_value(provider, "default_product_id")
+        product_id = request.product_id or self._required_config_value(
+            provider, "default_product_id"
+        )
         partner = await self._require_partner_for_client_request(
             provider, request.client_request_id
         )
@@ -272,7 +274,9 @@ class FactoringService(BaseService):
             hook_url=hook_url,
             status="WAITING_SIGN",
             prescoring_status=prescoring.status,
-            prescoring_score=Decimal(str(prescoring.score)) if prescoring.score is not None else None,
+            prescoring_score=Decimal(str(prescoring.score))
+            if prescoring.score is not None
+            else None,
             prescoring_message=prescoring.message,
             prescoring_max_limit=prescoring.max_limit,
             prescoring_checked_at=prescoring.checked_at,
@@ -533,22 +537,26 @@ class FactoringService(BaseService):
             principal=application.principal or 0,
             period=application.period or 0,
             created_by=application.created_by or 0,
-            print_forms=[PrintFormItem(name=item["name"], url=item["url"]) for item in bank_print_forms],
+            print_forms=[
+                PrintFormItem(name=item["name"], url=item["url"]) for item in bank_print_forms
+            ],
             credit_contract=application.credit_contract,
             branch_code=application.branch_code or "200000",
             product_id=product_id,
             is_knox=request.is_knox,
         )
         reference_id = str(application.id)
-        if self._prescoring_required(provider):
-            if application.prescoring_score is None or application.prescoring_max_limit is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        "Для отправки в банк нужны score и max_limit прескоринга. "
-                        "Подготовьте документы заново (prepare)."
-                    ),
-                )
+        prescoring_missing = (
+            application.prescoring_score is None or application.prescoring_max_limit is None
+        )
+        if self._prescoring_required(provider) and prescoring_missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Для отправки в банк нужны score и max_limit прескоринга. "
+                    "Подготовьте документы заново (prepare)."
+                ),
+            )
         bank_payload = self._build_apply_payload(
             provider=provider,
             iin=iin,
@@ -576,7 +584,9 @@ class FactoringService(BaseService):
             payload=bank_payload,
         )
         try:
-            response_payload = await self._apply_with_reauth(provider=provider, payload=bank_payload)
+            response_payload = await self._apply_with_reauth(
+                provider=provider, payload=bank_payload
+            )
         except HTTPException as exc:
             await self._log_event(
                 "FF_APPLY_FAILED",
@@ -643,7 +653,9 @@ class FactoringService(BaseService):
             or len(stored_token) != len(incoming)
             or not compare_digest(stored_token, incoming)
         ):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Print form not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Print form not found."
+            )
         self._require_print_form_link_active(form)
         return await self._fetch_signed_print_form_pdf(application, form)
 
@@ -852,7 +864,7 @@ class FactoringService(BaseService):
                 application_id=application_id,
                 clear=True,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "Failed to clear REQUESTED refund after bank error | id={id} error={error}",
                 id=application_id,
@@ -943,7 +955,7 @@ class FactoringService(BaseService):
                 application_id=application_id,
                 created_by=application.created_by,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             detail = exc.message if isinstance(exc, StoredProcedureError) else str(exc)
             logger.warning(
                 "Factoring auto-apply failed | application_id={id} error={error}",
@@ -1098,8 +1110,7 @@ class FactoringService(BaseService):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        f"За {issue_date.isoformat()} несколько ТОО ({ids}). "
-                        "Передайте company_id."
+                        f"За {issue_date.isoformat()} несколько ТОО ({ids}). Передайте company_id."
                     ),
                 )
             company_id = next(iter(by_company))
@@ -1355,7 +1366,8 @@ class FactoringService(BaseService):
             access_token = await self._ensure_valid_token(provider)
         except FactoringClientError as exc:
             await self._log_cession_failed(
-                company_items, {**failure_payload, "http_status": exc.status_code, "error": exc.detail}
+                company_items,
+                {**failure_payload, "http_status": exc.status_code, "error": exc.detail},
             )
             raise self._map_client_error(exc) from exc
 
@@ -1369,7 +1381,9 @@ class FactoringService(BaseService):
         )
         if marked != len(application_ids):
             if marked:
-                await self.repository.unmark_cession_sent_committed(application_ids, contract_number)
+                await self.repository.unmark_cession_sent_committed(
+                    application_ids, contract_number
+                )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Цессия по этим заявкам уже отправляется или отправлена. Обновите страницу.",
@@ -1409,12 +1423,18 @@ class FactoringService(BaseService):
                 },
             )
             if rejected:
-                await self.repository.unmark_cession_sent_committed(application_ids, contract_number)
+                await self.repository.unmark_cession_sent_committed(
+                    application_ids, contract_number
+                )
             raise self._map_client_error(exc) from exc
         except Exception as exc:
             await self._log_cession_failed(
                 company_items,
-                {**failure_payload, "error": str(exc) or type(exc).__name__, "bank_rejected": False},
+                {
+                    **failure_payload,
+                    "error": str(exc) or type(exc).__name__,
+                    "bank_rejected": False,
+                },
             )
             raise
 
@@ -1530,7 +1550,9 @@ class FactoringService(BaseService):
         return issue_date
 
     @staticmethod
-    def _cession_signer_config(provider: FactoringProvider, company_id: int | None) -> dict[str, Any]:
+    def _cession_signer_config(
+        provider: FactoringProvider, company_id: int | None
+    ) -> dict[str, Any]:
         """provider.config.cession_signer_by_company_id["<id>"]:
         poa_num, poa_date, fio_ru_gen, position_ru_gen, position_kz."""
         raw = provider.config.get("cession_signer_by_company_id")
@@ -1574,7 +1596,9 @@ class FactoringService(BaseService):
             n += 1
         return f"{base}-{n}"
 
-    async def _log_cession_failed(self, company_items: list[CessionBatchItem], payload: dict[str, Any]) -> None:
+    async def _log_cession_failed(
+        self, company_items: list[CessionBatchItem], payload: dict[str, Any]
+    ) -> None:
         await self._log_event(
             "CESSION_FAILED",
             factoring_id=company_items[0].id,
@@ -1935,7 +1959,9 @@ class FactoringService(BaseService):
         try:
             for base_spec in PRINT_FORM_SPECS:
                 spec = dict(base_spec)
-                spec["template_code"] = (template_codes or {}).get(spec["name"], spec["template_code"])
+                spec["template_code"] = (template_codes or {}).get(
+                    spec["name"], spec["template_code"]
+                )
                 rendered.append((spec, await self._render_print_form_pdf(spec, placeholders)))
             callback_url = f"{self.public_base_url}/api/v1/factoring/ff/sign-callback"
             sign_url, signed_docs = await mynca.sign_batch(
@@ -1963,11 +1989,7 @@ class FactoringService(BaseService):
                 detail=exc.detail,
             ) from exc
 
-        by_name = {
-            item["file_name"]: item
-            for item in signed_docs
-            if item.get("file_name")
-        }
+        by_name = {item["file_name"]: item for item in signed_docs if item.get("file_name")}
         expires_at = datetime.now(UTC) + timedelta(seconds=PRINT_FORM_PUBLIC_URL_TTL_SEC)
         forms: list[dict[str, Any]] = []
         for index, (spec, _) in enumerate(rendered):
@@ -2214,7 +2236,9 @@ class FactoringService(BaseService):
         principal_min, principal_max = parse_principal_limits(provider.config)
         return FactoringProviderConfigResponse(
             periods=periods,
-            discount_by_period={str(period): rates[period] for period in periods if period in rates},
+            discount_by_period={
+                str(period): rates[period] for period in periods if period in rates
+            },
             principal_min=principal_min,
             principal_max=principal_max,
             prescoring_enabled=self._is_prescoring_configured(provider),
@@ -2230,16 +2254,14 @@ class FactoringService(BaseService):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Сумма займа {principal:,.0f} ₸ меньше минимальной "
-                    f"{principal_min:,.0f} ₸."
+                    f"Сумма займа {principal:,.0f} ₸ меньше минимальной {principal_min:,.0f} ₸."
                 ).replace(",", " "),
             )
         if principal > principal_max:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Сумма займа {principal:,.0f} ₸ больше максимальной "
-                    f"{principal_max:,.0f} ₸."
+                    f"Сумма займа {principal:,.0f} ₸ больше максимальной {principal_max:,.0f} ₸."
                 ).replace(",", " "),
             )
 
@@ -2296,7 +2318,7 @@ class FactoringService(BaseService):
         raw = provider.config.get("prescoring_validity_sec", 3600)
         try:
             validity = int(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 3600
         return max(60, min(validity, 86400))
 
@@ -2337,7 +2359,8 @@ class FactoringService(BaseService):
         if status_value != "APPROVED":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=outcome.message or f"Клиент не прошёл прескоринг ({status_value or 'UNKNOWN'}).",
+                detail=outcome.message
+                or f"Клиент не прошёл прескоринг ({status_value or 'UNKNOWN'}).",
             )
         if (
             outcome.max_limit is not None
@@ -2455,7 +2478,7 @@ class FactoringService(BaseService):
         raw = provider.config.get("prescoring_timeout_sec", 15)
         try:
             timeout = float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 15.0
         return max(3.0, min(timeout, 60.0))
 
@@ -2630,10 +2653,7 @@ class FactoringService(BaseService):
         if deal_iin != iin:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    "ИИН заявки на факторинг должен совпадать с ИИН сделки "
-                    f"({deal_iin})."
-                ),
+                detail=(f"ИИН заявки на факторинг должен совпадать с ИИН сделки ({deal_iin})."),
             )
 
     async def _require_deal_budget(
@@ -2765,7 +2785,18 @@ class FactoringService(BaseService):
             for key, item in value.items():
                 lowered = key.lower()
                 if (
-                    lowered in {"iin", "mobile_phone", "phone", "prop_iin", "prop_phone", "first_name", "last_name", "middle_name", "fio"}
+                    lowered
+                    in {
+                        "iin",
+                        "mobile_phone",
+                        "phone",
+                        "prop_iin",
+                        "prop_phone",
+                        "first_name",
+                        "last_name",
+                        "middle_name",
+                        "fio",
+                    }
                     or lowered.endswith("_iin")
                     or "phone" in lowered
                 ):
@@ -2834,7 +2865,7 @@ class FactoringService(BaseService):
                 payload=self._redact_pii(payload),
                 source=source,
             )
-        except Exception as exc:  # noqa: BLE001 — audit must not break main flow
+        except Exception as exc:
             logger.warning(
                 "Factoring event log write failed | event_type={event_type} "
                 "factoring_id={factoring_id} error={error}",
@@ -2878,7 +2909,9 @@ class FactoringService(BaseService):
         )
 
     @staticmethod
-    def _parse_basic_authorization_header(header_value: str | None) -> tuple[str | None, str | None]:
+    def _parse_basic_authorization_header(
+        header_value: str | None,
+    ) -> tuple[str | None, str | None]:
         if header_value is None or not header_value.startswith("Basic "):
             return None, None
         token = header_value[6:].strip()
@@ -2886,7 +2919,7 @@ class FactoringService(BaseService):
             return None, None
         try:
             decoded = base64.b64decode(token, validate=True).decode("utf-8")
-        except (binascii.Error, UnicodeDecodeError):
+        except binascii.Error, UnicodeDecodeError:
             return None, None
         if ":" not in decoded:
             return None, None

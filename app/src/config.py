@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import os
-from typing import List
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in ("1", "true", "yes")
+
+
+def _list_env(name: str, default: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in os.getenv(name, default).split(",") if item.strip())
+
+
+def _first_nonempty_env(*names: str, default: str) -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return default.rstrip("/")
 
 
 class BigIntegrationAuthConfig:
@@ -36,11 +54,7 @@ class IntegrationContextConfig:
 
     secret: str = os.getenv("INTEGRATION_CONTEXT_SECRET", "")
     audience: str = os.getenv("INTEGRATION_CONTEXT_AUDIENCE", "integrations-sr")
-    issuer_allowlist: tuple[str, ...] = tuple(
-        item.strip()
-        for item in os.getenv("INTEGRATION_CONTEXT_ISSUERS", "sr-crm").split(",")
-        if item.strip()
-    )
+    issuer_allowlist: tuple[str, ...] = _list_env("INTEGRATION_CONTEXT_ISSUERS", "sr-crm")
 
     @property
     def is_enforced(self) -> bool:
@@ -68,13 +82,13 @@ class FactoringPrescoringConfig:
 
 
 class CORSConfig:
-    allow_origins: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
+    allow_origins: tuple[str, ...] = _list_env(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
     allow_credentials: bool = True
-    allow_methods: List[str] = ["*"]
-    allow_headers: List[str] = ["*"]
+    allow_methods: tuple[str, ...] = ("*",)
+    allow_headers: tuple[str, ...] = ("*",)
 
 
 class MyncaConfig:
@@ -101,6 +115,10 @@ class MyncaConfig:
 
 class AppConfig:
     env: str = os.getenv("APP_ENV", "stage")
+    version: str = os.getenv("APP_VERSION", "0.1.0")
+    # /scalar and /openapi.json. Off unless enabled: the schema lists every webhook
+    # and internal route, so production keeps it closed.
+    api_docs_enabled: bool = _bool_env("API_DOCS_ENABLED")
 
 
 class MinioConfig:
@@ -115,14 +133,6 @@ class MinioConfig:
     @property
     def is_configured(self) -> bool:
         return bool(self.endpoint and self.access_key and self.secret_key and self.bucket)
-
-
-def _first_nonempty_env(*names: str, default: str) -> str:
-    for name in names:
-        value = (os.getenv(name) or "").strip()
-        if value:
-            return value.rstrip("/")
-    return default.rstrip("/")
 
 
 class FileStoreConfig:

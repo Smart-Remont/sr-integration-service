@@ -8,7 +8,9 @@ from src.features.factoring.schemas import FactoringApplicationResponse
 
 # IMPORTANT! Проверка ИИН подписанта ВРЕМЕННО ОТКЛЮЧЕНА для теста с Freedom
 # (service._sign_callback_iin_error). Снять skip вместе с возвратом проверки.
-IIN_CHECK_DISABLED = pytest.mark.skip(reason="IMPORTANT: проверка ИИН подписанта временно отключена")
+IIN_CHECK_DISABLED = pytest.mark.skip(
+    reason="IMPORTANT: проверка ИИН подписанта временно отключена"
+)
 
 
 def _application(*, iin: str | None = "040516551071") -> FactoringApplicationResponse:
@@ -45,8 +47,7 @@ async def test_sign_callback_rejects_iin_mismatch():
     assert result == {
         "status": False,
         "error": (
-            "ИИН подписанта не соответствует заявке "
-            f"(ожидается 040516551071, DN: {dn_name})"
+            f"ИИН подписанта не соответствует заявке (ожидается 040516551071, DN: {dn_name})"
         ),
     }
 
@@ -71,9 +72,7 @@ async def test_sign_callback_acks_matching_iin():
 async def test_sign_callback_rejects_missing_dn_name():
     svc = _service(_application())
 
-    result = await svc.handle_sign_callback(
-        {"status": "SUCCESS", "sign_process_id": "pid-1"}
-    )
+    result = await svc.handle_sign_callback({"status": "SUCCESS", "sign_process_id": "pid-1"})
 
     assert result == {"status": False, "error": "Данные подписавшего не были получены"}
 
@@ -135,10 +134,7 @@ async def test_batch_sign_callback_rejects_iin_on_every_document():
         }
     )
 
-    error = (
-        "ИИН подписанта не соответствует заявке "
-        f"(ожидается 040516551071, DN: {dn_name})"
-    )
+    error = f"ИИН подписанта не соответствует заявке (ожидается 040516551071, DN: {dn_name})"
     assert result == {
         "status": "success",
         "documents": [
@@ -177,8 +173,16 @@ def test_parse_sign_batch_response():
             "data": {
                 "sign_url": "https://nca.example/sign/batch-1",
                 "documents": [
-                    {"file_name": "factoring_application.pdf", "sign_process_id": "pid-1", "group_id": "g-1"},
-                    {"file_name": "factoring_notification.pdf", "sign_process_id": "pid-2", "group_id": "g-2"},
+                    {
+                        "file_name": "factoring_application.pdf",
+                        "sign_process_id": "pid-1",
+                        "group_id": "g-1",
+                    },
+                    {
+                        "file_name": "factoring_notification.pdf",
+                        "sign_process_id": "pid-2",
+                        "group_id": "g-2",
+                    },
                 ],
             }
         }
@@ -201,8 +205,16 @@ async def test_prepare_print_forms_opens_one_batch():
         return_value=(
             "https://nca.example/sign/batch-1",
             [
-                {"file_name": "factoring_application.pdf", "sign_process_id": "pid-1", "group_id": "g-1"},
-                {"file_name": "factoring_notification.pdf", "sign_process_id": "pid-2", "group_id": "g-2"},
+                {
+                    "file_name": "factoring_application.pdf",
+                    "sign_process_id": "pid-1",
+                    "group_id": "g-1",
+                },
+                {
+                    "file_name": "factoring_notification.pdf",
+                    "sign_process_id": "pid-2",
+                    "group_id": "g-2",
+                },
             ],
         )
     )

@@ -1,9 +1,8 @@
 import json
 
-from src.repository import BaseRepository
+from src.repository import BaseRepository, scalar_from_sp_rows
 from src.repository.base import SpRow
 
-from ..db import scalar_from_sp_rows
 from ..errors import BigIntegrationDatabaseError, to_big_integration_database_error
 
 _DDU_MODULE_CODE = "DDU"

@@ -106,7 +106,10 @@ def test_cession_sums_financing_is_claims_minus_discount() -> None:
     assert header["assignment_sum"] == header["claims_sum"]
     assert header["assignment_sum_words_ru"] == "два миллиона восемьсот пятьдесят тысяч"
     assert header["assignment_sum_words_kz"] == "екі миллион сегіз жүз елу мың"
-    assert header["financing_sum_words_ru"] == "два миллиона пятьсот семьдесят одна тысяча семьсот пятьдесят"
+    assert (
+        header["financing_sum_words_ru"]
+        == "два миллиона пятьсот семьдесят одна тысяча семьсот пятьдесят"
+    )
     assert header["financing_sum_words_kz"] == "екі миллион бес жүз жетпіс бір мың жеті жүз елу"
 
     first, second = rows
@@ -144,7 +147,11 @@ def test_cession_framework_contract_of_company() -> None:
 
 def test_cession_signer_config_replaces_test_power_of_attorney() -> None:
     header, _ = _build(
-        signer_config={"poa_num": "15-2026", "poa_date": "2026-01-10", "fio_ru_gen": "Усембековой Шынар Сериковны"}
+        signer_config={
+            "poa_num": "15-2026",
+            "poa_date": "2026-01-10",
+            "fio_ru_gen": "Усембековой Шынар Сериковны",
+        }
     )
 
     assert header["client_basis_ru"] == "Доверенности № 15-2026 от 10 января 2026 г."
@@ -155,9 +162,9 @@ def test_cession_signer_config_replaces_test_power_of_attorney() -> None:
 def test_fill_keeps_formatting_of_other_runs() -> None:
     body = (
         "<w:p>"
-        '<w:r><w:rPr><w:b/></w:rPr><w:t>ТОО «</w:t></w:r>'
+        "<w:r><w:rPr><w:b/></w:rPr><w:t>ТОО «</w:t></w:r>"
         "<w:r><w:t>{{ client_</w:t></w:r><w:r><w:t>name }}</w:t></w:r>"
-        '<w:r><w:rPr><w:b/></w:rPr><w:t>»</w:t></w:r>'
+        "<w:r><w:rPr><w:b/></w:rPr><w:t>»</w:t></w:r>"
         "</w:p>"
     )
 
@@ -205,9 +212,7 @@ PROVIDER_CONFIG = {
 }
 
 
-def _preview_service(
-    items: list[CessionBatchItem], config: dict | None = None
-) -> FactoringService:
+def _preview_service(items: list[CessionBatchItem], config: dict | None = None) -> FactoringService:
     repository = MagicMock()
     repository.list_cession_batch = AsyncMock(return_value=items)
     repository.get_provider_by_code = AsyncMock(
@@ -219,7 +224,11 @@ def _preview_service(
         )
     )
     repository.get_cession_company = AsyncMock(
-        return_value={"company_name_official": "ТОО «Smart Remont Azure»", "bank_account": "KZ00", "director_fio": "Усембекова Шынар Сериковна"}
+        return_value={
+            "company_name_official": "ТОО «Smart Remont Azure»",
+            "bank_account": "KZ00",
+            "director_fio": "Усембекова Шынар Сериковна",
+        }
     )
     repository.mark_cession_sent = AsyncMock()
     client = MagicMock()

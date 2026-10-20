@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+
 from src.schema import BaseSchema
 
 from .openapi_examples import (
@@ -33,7 +34,12 @@ class FFRepaymentCondition(BaseSchema):
     def _flat_limits(cls, data: Any) -> Any:
         # The bank's docs show both {"principal_limits": {"min", "max"}} and
         # {"min", "max"} right in the condition; we always answer with the first.
-        if isinstance(data, dict) and "principal_limits" not in data and "min" in data and "max" in data:
+        if (
+            isinstance(data, dict)
+            and "principal_limits" not in data
+            and "min" in data
+            and "max" in data
+        ):
             data = {**data, "principal_limits": {"min": data["min"], "max": data["max"]}}
         return data
 
@@ -44,7 +50,7 @@ class FFProduct(BaseSchema):
     repayment: list[FFRepaymentCondition]
 
     @model_validator(mode="after")
-    def _normalize_method(self) -> "FFProduct":
+    def _normalize_method(self) -> FFProduct:
         # The bank's examples spell installment as INSTALMENT; CRM and the
         # catalog use INSTALLMENT.
         method = self.repayment_method.strip().upper()
@@ -63,7 +69,9 @@ class SyncProductsResponse(BaseSchema):
     inserted: int
     closed: int
     unchanged: int
-    relinked: int = Field(default=0, description="Сколько банков перенесено на новую строку продукта")
+    relinked: int = Field(
+        default=0, description="Сколько банков перенесено на новую строку продукта"
+    )
     orphaned_bank_ids: list[int] = Field(
         default_factory=list,
         description="Банки, чей продукт банк убрал: в рассрочке их не будет, пока не перепривязать",
@@ -118,7 +126,7 @@ class FFProductsResponse(BaseSchema):
 
 
 class InstallmentApplicationListResponse(BaseSchema):
-    items: list["InstallmentApplicationResponse"]
+    items: list[InstallmentApplicationResponse]
     total: int
 
 

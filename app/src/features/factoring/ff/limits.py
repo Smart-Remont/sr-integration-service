@@ -10,7 +10,7 @@ def _parse_decimal(value: Any, default: Decimal) -> Decimal:
         return default
     try:
         parsed = Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError):
+    except InvalidOperation, ValueError, TypeError:
         return default
     if parsed <= 0:
         return default
@@ -46,7 +46,7 @@ def parse_prescoring_max_limit(raw: Any) -> Decimal | None:
         return None
     try:
         value = Decimal(text)
-    except (InvalidOperation, ValueError):
+    except InvalidOperation, ValueError:
         return None
     if value <= 0:
         return None

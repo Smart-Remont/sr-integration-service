@@ -4,9 +4,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from src.features.big_integration.db import scalar_from_sp_rows
-from src.features.installment.deal_guard import fetch_deal_client_request_state
-from src.repository import BaseRepository
+from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.deal_guard import fetch_deal_client_request_state
 
 from ..schemas import FactoringApplicationResponse
 
@@ -86,7 +85,9 @@ class FactoringRepository(BaseRepository):
             config=config,
         )
 
-    async def get_active_credentials(self, provider_id: int, env: str) -> FactoringCredential | None:
+    async def get_active_credentials(
+        self, provider_id: int, env: str
+    ) -> FactoringCredential | None:
         rows = await self.call_sp(
             "public.factoring__credential_get_active",
             provider_id,
@@ -292,23 +293,19 @@ class FactoringRepository(BaseRepository):
         prescoring_max_limit: Decimal | None,
         prescoring_checked_at: datetime | None,
     ) -> None:
-        """Close the application on a separate connection: the service raises
-        422 right after, which rolls back the request transaction."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                await other.update_application_prescoring(
-                    application_id=application_id,
-                    prescoring_status=prescoring_status,
-                    prescoring_score=prescoring_score,
-                    prescoring_message=prescoring_message,
-                    prescoring_max_limit=prescoring_max_limit,
-                    prescoring_checked_at=prescoring_checked_at,
-                    status="REJECTED",
-                )
+        """Committed at once: the service raises 422 right after, which rolls
+        back the request transaction."""
+        await self.committed(
+            lambda repo: repo.update_application_prescoring(
+                application_id=application_id,
+                prescoring_status=prescoring_status,
+                prescoring_score=prescoring_score,
+                prescoring_message=prescoring_message,
+                prescoring_max_limit=prescoring_max_limit,
+                prescoring_checked_at=prescoring_checked_at,
+                status="REJECTED",
+            )
+        )
 
     async def insert_event_log(
         self,
@@ -341,20 +338,16 @@ class FactoringRepository(BaseRepository):
         payload: dict[str, Any],
         source: str,
     ) -> None:
-        """Write audit on a separate connection so a later HTTP 422 rollback
-        does not erase CESSION_REQUEST / bank error details."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                await other.insert_event_log(
-                    factoring_id=factoring_id,
-                    event_type=event_type,
-                    payload=payload,
-                    source=source,
-                )
+        """Committed at once so a later HTTP 422 rollback does not erase
+        CESSION_REQUEST / bank error details."""
+        await self.committed(
+            lambda repo: repo.insert_event_log(
+                factoring_id=factoring_id,
+                event_type=event_type,
+                payload=payload,
+                source=source,
+            )
+        )
 
     def _row_to_application(self, row: dict[str, Any]) -> FactoringApplicationResponse:
         payload = dict(row)
@@ -363,7 +356,9 @@ class FactoringRepository(BaseRepository):
                 payload[key] = json.loads(payload[key])
         return FactoringApplicationResponse.model_validate(payload)
 
-    async def get_application_by_id(self, application_id: int) -> FactoringApplicationResponse | None:
+    async def get_application_by_id(
+        self, application_id: int
+    ) -> FactoringApplicationResponse | None:
         rows = await self.call_sp(
             "public.factoring__application_get",
             application_id,
@@ -660,36 +655,27 @@ class FactoringRepository(BaseRepository):
         sign_process_id: str | None = None,
         sign_group_id: str | None = None,
     ) -> int:
-        """Stamp cession on a separate connection so a later rollback
-        does not un-mark applications the bank already accepted."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                return await other.mark_cession_sent(
-                    application_ids,
-                    contract_number,
-                    sign_process_id=sign_process_id,
-                    sign_group_id=sign_group_id,
-                )
+        """Committed at once so a later rollback does not un-mark applications
+        the bank already accepted."""
+        return await self.committed(
+            lambda repo: repo.mark_cession_sent(
+                application_ids,
+                contract_number,
+                sign_process_id=sign_process_id,
+                sign_group_id=sign_group_id,
+            )
+        )
 
     async def unmark_cession_sent_committed(
         self,
         application_ids: list[int],
         contract_number: str | None = None,
     ) -> int:
-        """Un-stamp on a separate connection: the request transaction is rolled
-        back when the service raises after a bank rejection, which would undo
-        an un-mark done on the request connection."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                return await other.unmark_cession_sent(application_ids, contract_number)
+        """Committed at once: the request transaction rolls back when the service
+        raises after a bank rejection, which would undo an un-mark done on it."""
+        return await self.committed(
+            lambda repo: repo.unmark_cession_sent(application_ids, contract_number)
+        )
 
     async def list_cession_contract_numbers(self, prefix: str) -> list[str]:
         rows = await self.fetch(
