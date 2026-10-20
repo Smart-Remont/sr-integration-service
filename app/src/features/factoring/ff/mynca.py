@@ -184,15 +184,47 @@ class MyncaClient:
         if group_id:
             payload["group_id"] = group_id
         body = await self._request_json("POST", "/cms/sign-save", json=payload)
-        sign_process_id = body.get("sign_process_id")
+        data = _unwrap_data(body)
+        sign_process_id = data.get("sign_process_id") or body.get("sign_process_id")
         if not isinstance(sign_process_id, str) or not sign_process_id:
             raise MyncaClientError("MyNCA cms/sign-save did not return sign_process_id.")
-        return body
+        return {
+            "sign_process_id": sign_process_id,
+            "dn_name": str(data.get("dn_name") or body.get("dn_name") or ""),
+            "group_id": data.get("group_id") or body.get("group_id"),
+        }
 
     async def download_cms(self, sign_process_id: str) -> bytes:
         """Fetches the raw CMS (PKCS#7) blob for a sign_process_id created via
         cms/sign-save."""
         return await self._request_bytes("GET", f"/sign/{sign_process_id}/download-cms")
+
+    async def sign_rollback(self, sign_process_id: str) -> None:
+        """POST /sign/{id}/rollback — undo a persisted cms/sign-save on MyNCA failure."""
+        await self._request_json("POST", f"/sign/{sign_process_id}/rollback")
+
+    async def pkcs12_validate(
+        self,
+        *,
+        key_b64: str,
+        password: str,
+        key_alias: str | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "key": key_b64,
+            "password": password,
+            "revocationCheck": ["OCSP", "CRL"],
+        }
+        if key_alias:
+            payload["keyAlias"] = key_alias
+        body = await self._request_json("POST", "/pkcs12/info", json=payload)
+        data = _unwrap_data(body)
+        if data.get("valid") is True:
+            return True
+        certificate = body.get("certificate")
+        if isinstance(certificate, dict) and certificate.get("valid") is True:
+            return True
+        return False
 
     async def _request_json(
         self,
