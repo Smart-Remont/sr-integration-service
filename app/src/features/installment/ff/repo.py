@@ -2,13 +2,16 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from src.features.big_integration.db import scalar_from_sp_rows
 from src.repository import BaseRepository
 
 from ..deal_guard import fetch_deal_client_request_state
 from ..schemas import InstallmentApplicationResponse
+
+T = TypeVar("T")
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,6 +58,21 @@ class FFAllowedBank:
 
 
 class FFRepository(BaseRepository):
+    async def committed(self, action: Callable[["FFRepository"], Awaitable[T]]) -> T:
+        """Run `action` on its own connection and commit it right away.
+
+        The request runs in one transaction that rolls back on any HTTP error.
+        The application row must be committed before the bank is called (the
+        bank's hook may come at once, and a timeout must not erase the row the
+        bank already knows by reference_id); marks and the event log must
+        survive the error the request then returns."""
+        from src.database.pool import get_db_pool
+
+        pool = await get_db_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                return await action(FFRepository(connection=connection))
+
     async def get_provider_by_code(self, code: str) -> FFProvider | None:
         rows = await self.call_sp(
             "public.installment__provider_get",
@@ -145,6 +163,8 @@ class FFRepository(BaseRepository):
         principal: Decimal,
         period: int,
         created_by: int,
+        iin: str,
+        mobile_phone: str,
         installment_product_id: int | None = None,
         status: str = "NEW",
     ) -> int:
@@ -157,6 +177,8 @@ class FFRepository(BaseRepository):
             "principal": str(principal),
             "period": period,
             "created_by": created_by,
+            "iin": iin,
+            "mobile_phone": mobile_phone,
             "status": status,
         }
         if installment_product_id is not None:
@@ -204,6 +226,25 @@ class FFRepository(BaseRepository):
                 module_code="MYSPACE",
             )
         )
+
+    async def mark_apply_unknown(self, application_id: int) -> None:
+        scalar_from_sp_rows(
+            await self.call_sp(
+                "public.installment__application_mark_apply_unknown",
+                json.dumps({"application_id": application_id}),
+                module_code="MYSPACE",
+            )
+        )
+
+    async def list_for_reconcile(self, *, stale_minutes: int, limit: int) -> list[dict[str, Any]]:
+        rows = await self.call_sp(
+            "public.installment__applications_for_reconcile",
+            stale_minutes,
+            limit,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        return [dict(row) for row in rows]
 
     async def insert_event_log(
         self,
@@ -353,6 +394,8 @@ class FFRepository(BaseRepository):
         product_id: str | None,
         loan_type: str | None,
         redirect_url: str | None,
+        credit_contract: str | None = None,
+        issued_at: str | None = None,
     ) -> None:
         payload = {
             "application_id": application_id,
@@ -362,6 +405,8 @@ class FFRepository(BaseRepository):
             "product_id": product_id,
             "loan_type": loan_type,
             "redirect_url": redirect_url,
+            "credit_contract": credit_contract,
+            "issued_at": issued_at,
         }
         scalar_from_sp_rows(
             await self.call_sp(
@@ -380,6 +425,7 @@ class FFRepository(BaseRepository):
         product_id: str | None,
         loan_type: str | None,
         uuid: str | None = None,
+        credit_contract: str | None = None,
     ) -> None:
         payload = {
             "application_id": application_id,
@@ -388,6 +434,7 @@ class FFRepository(BaseRepository):
             "product_id": product_id,
             "loan_type": loan_type,
             "uuid": uuid,
+            "credit_contract": credit_contract,
         }
         scalar_from_sp_rows(
             await self.call_sp(

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Request, status
+from fastapi import APIRouter, Path, Query, Request, status
 from src.integration_context.constants import SCOPE_INSTALLMENT
 from src.integration_context.deps import IntegrationContextDep
 from src.integration_context.helpers import employee_id_from_context
@@ -22,11 +22,12 @@ from .schemas import (
     ApplyInstallmentApplicationResponse,
     CreateInstallmentApplicationRequest,
     CreateInstallmentApplicationResponse,
-    FFWebhookPayload,
     FFProductsResponse,
+    FFWebhookPayload,
     InstallmentApplicationListResponse,
     InstallmentApplicationResponse,
     ProviderProductListResponse,
+    ReconcileResponse,
     SyncProductsResponse,
     WebhookAckResponse,
 )
@@ -226,13 +227,39 @@ async def poll_application(
     return await ff_service.poll_application(application_id)
 
 
+@router.get(
+    "/reconcile",
+    response_model=ReconcileResponse,
+    summary="Сверка открытых заявок с банком (cron)",
+    description=(
+        "Для cron раз в 5–10 минут. Запрашивает у банка статус заявок, которые давно не менялись; "
+        "закрывает как APPLY_FAILED заявки без ответа банка на подачу старше `unknown_after_minutes`; "
+        "записывает в сделку выданные, но не записанные. GET и POST — одно и то же."
+    ),
+)
+@router.post("/reconcile", response_model=ReconcileResponse, include_in_schema=False)
+async def reconcile_applications(
+    _: InstallmentBasicAuthDep,
+    ff_service: FFServiceDep,
+    stale_minutes: Annotated[int, Query(ge=1, le=1440)] = 10,
+    unknown_after_minutes: Annotated[int, Query(ge=61, le=10080)] = 120,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> ReconcileResponse:
+    return await ff_service.reconcile(
+        stale_minutes=stale_minutes,
+        unknown_after_minutes=unknown_after_minutes,
+        limit=limit,
+    )
+
+
 @router.post(
     "/webhook",
     response_model=WebhookAckResponse,
     summary="Webhook от Freedom Finance",
     description=(
         "Входящий hook от банка. Basic Auth обязателен (`webhook_username` / `webhook_password` у провайдера FF). "
-        "Без кредов в БД hook отклоняется, заявку подать нельзя."
+        "Без кредов в БД hook отклоняется, заявку подать нельзя. "
+        "Статус, которого нет в описании банка (например, возврат), принимается без изменений заявки. "
         "В Swagger выберите пример: approved / rejected / issued."
     ),
     responses=WEBHOOK_ACK_RESPONSES,
