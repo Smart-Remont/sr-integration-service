@@ -380,6 +380,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "scalar-fastapi" },
+    { name = "segno" },
     { name = "uvicorn" },
 ]
 
@@ -396,6 +397,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "scalar-fastapi", specifier = ">=1.8.2" },
+    { name = "segno", specifier = ">=1.6.6" },
     { name = "uvicorn", specifier = ">=0.48.0" },
 ]
 
@@ -690,6 +692,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cc/81/c0c70776a3d7d371ee06d38d26a8d361c97439d46f79acb6d67cf6c760ad/scalar_fastapi-1.8.2.tar.gz", hash = "sha256:0de09b8c63f78c1052792faa200d740b2ccaeeb88ac54e7ea633ac4edc6fde82", size = 8371, upload-time = "2026-04-09T22:41:24.267Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/b1/b9a482620479b2801a4dfa5c4c10b4cc280097e894114e0298f21a0fca55/scalar_fastapi-1.8.2-py3-none-any.whl", hash = "sha256:d96e2c8b3676491eaebb4ec8d9f4de77adb2374d86f87d321546fa6f084e8cb8", size = 7677, upload-time = "2026-04-09T22:41:23.209Z" },
+]
+
+[[package]]
+name = "segno"
+version = "1.6.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/2e/b396f750c53f570055bf5a9fc1ace09bed2dff013c73b7afec5702a581ba/segno-1.6.6.tar.gz", hash = "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3", size = 1628586, upload-time = "2025-03-12T22:12:53.324Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/02/12c73fd423eb9577b97fc1924966b929eff7074ae6b2e15dd3d30cb9e4ae/segno-1.6.6-py3-none-any.whl", hash = "sha256:28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7", size = 76503, upload-time = "2025-03-12T22:12:48.106Z" },
 ]
 
 [[package]]
