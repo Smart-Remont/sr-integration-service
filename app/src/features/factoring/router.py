@@ -1,7 +1,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from loguru import logger
+
+from src.integration_context.constants import SCOPE_FACTORING
+from src.integration_context.deps import IntegrationContextDep
+from src.integration_context.helpers import employee_id_from_context
 from src.routers.config import api_prefix_config
 
 from .auth import FactoringBasicAuthDep
@@ -12,6 +17,7 @@ from .openapi_examples import (
     WEBHOOK_ACK_RESPONSES,
 )
 from .schemas import (
+    CessionPreviewRequest,
     CreateFactoringApplicationResponse,
     CreateFactoringRefundRequest,
     FactoringApplicationListResponse,
@@ -40,8 +46,11 @@ router = APIRouter(prefix=api_prefix_config.v1.factoring_ff, tags=["Factoring (F
 )
 async def get_provider_config(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     service: FactoringServiceDep,
 ) -> FactoringProviderConfigResponse:
+    if context is not None:
+        context.require_scope(SCOPE_FACTORING)
     return await service.get_provider_config()
 
 
@@ -52,10 +61,13 @@ async def get_provider_config(
 )
 async def list_applications(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     client_request_id: int,
     service: FactoringServiceDep,
 ) -> FactoringApplicationListResponse:
-    items = await service.get_applications_by_client_request(client_request_id)
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, client_request_id)
+    items = await service.get_applications_for_client(client_request_id)
     return FactoringApplicationListResponse(items=items, total=len(items))
 
 
@@ -83,9 +95,15 @@ async def create_application_disabled(_: FactoringBasicAuthDep) -> None:
 )
 async def prepare_documents(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     request: PrepareFactoringDocumentsRequest,
     service: FactoringServiceDep,
 ) -> PrepareFactoringDocumentsResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, request.client_request_id)
+        request = request.model_copy(
+            update={"created_by": employee_id_from_context(context, fallback=request.created_by)}
+        )
     return await service.prepare_documents(request)
 
 
@@ -95,15 +113,19 @@ async def prepare_documents(
     summary="Прескоринг клиента перед факторингом (Freedom ML)",
     description=(
         "Вызывает bank `prescoring_factoring` до prepare/submit. "
-        "Требует `config.prescoring_base_url` и env `FACTORING_PRESCORING_USER/PASSWORD`. "
+        "Требует `config.prescoring_base_url` и креды партнёра в "
+        "`config.prescoring_credentials` (fallback: env `FACTORING_PRESCORING_*`). "
         "При `prescoring_required=false` недоступность сервиса не блокирует (dev)."
     ),
 )
 async def prescoring_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     request: PrescoringFactoringRequest,
     service: FactoringServiceDep,
 ) -> PrescoringFactoringResponse:
+    if context is not None:
+        context.require_client_request(SCOPE_FACTORING, request.client_request_id)
     return await service.run_prescoring(request)
 
 
@@ -114,9 +136,12 @@ async def prescoring_application(
 )
 async def refresh_sign_status(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[1])],
     service: FactoringServiceDep,
 ) -> PrepareFactoringDocumentsResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.refresh_sign_status(application_id)
 
 
@@ -128,10 +153,13 @@ async def refresh_sign_status(
 )
 async def submit_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[1])],
     request: SubmitFactoringApplicationRequest,
     service: FactoringServiceDep,
 ) -> CreateFactoringApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.submit_application(application_id, request)
 
 
@@ -151,11 +179,62 @@ async def download_print_form(
 
 @router.post(
     "/sign-callback",
-    response_model=WebhookAckResponse,
-    summary="Callback MyNCA после подписи (no-op, статус проверяем poll)",
+    summary="Callback MyNCA после подписи печатной формы",
+    description=(
+        "Вызывает **MyNCA** (`back_url`). **Auth:** нет.\n\n"
+        "Одиночная подпись: `status=SUCCESS`, ИИН из `dn_name` сверяется с ИИН заявки. "
+        'Несовпадение — `{"status": false, "error": ...}`, MyNCA откатывает подпись.\n\n'
+        "Batch (`POST /sign/batch/create`, `atomic: true`): в теле `documents[]`. "
+        'Ответ — `{"status": "success", "documents": [{"sign_process_id", "status": "ok"|"error"}]}`. '
+        "Ошибочный документ откатывает весь пакет."
+    ),
 )
-async def sign_callback() -> WebhookAckResponse:
-    return WebhookAckResponse(ok=True, status=True)
+async def sign_callback(request: Request, service: FactoringServiceDep) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": False, "error": "Невалидный JSON в callback"},
+            status_code=400,
+        )
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": False, "error": "Невалидный JSON в callback"},
+            status_code=400,
+        )
+    try:
+        payload = await service.handle_sign_callback(body)
+    except Exception:
+        logger.exception("factoring sign-callback failed")
+        return JSONResponse(
+            {"status": False, "error": "Не удалось проверить ИИН подписанта"},
+            status_code=500,
+        )
+    return JSONResponse(payload)
+
+
+@router.post(
+    "/applications/cession/preview",
+    summary="PDF договора цессии без подписи и без отправки в банк",
+    description=(
+        "Та же выборка, что у `cession/send`: ISSUED/REVERSED за прошлый `issue_date` без "
+        "`cession_sent_at`, один PDF на ТОО. Сегодня и будущее — 422. Не ставит ЭЦП, не пишет `cession_sent_at` "
+        "и не вызывает банк. DOCX в PDF конвертирует MyNCA. Если за дату несколько ТОО, "
+        "нужен `company_id`."
+    ),
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def preview_cession(
+    _: FactoringBasicAuthDep,
+    request: CessionPreviewRequest,
+    service: FactoringServiceDep,
+) -> Response:
+    pdf, filename = await service.preview_cession(request)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(
@@ -163,15 +242,15 @@ async def sign_callback() -> WebhookAckResponse:
     response_model=SendCessionResponse,
     summary="Собрать выдачи за день и отправить банку договор цессии",
     description=(
-        "Собирает FACTORING-заявки со статусом ISSUED/REVERSED за `issue_date` (по умолчанию "
-        "сегодня, Asia/Almaty), которые ещё не были в цессии, группирует по ТОО "
-        "(`client_request_tab.company_id`) и отправляет **отдельный** договор цессии на "
-        "каждое юрлицо (у каждого своя `config.partner_by_company_id` и свой ЭЦП в "
+        "Собирает FACTORING-заявки со статусом ISSUED/REVERSED за прошлый `issue_date` "
+        "(Asia/Almaty; сегодня и будущее — 422), которые ещё не были в цессии, и отправляет договор цессии "
+        "**только для ТОО из `company_id`** (обязательное поле; одна цессия — одно ТОО; у каждого "
+        "своя `config.partner_by_company_id` и свой ЭЦП в "
         "`nca.company_key_store_tab`). Подписывает CMS через MyNCA. При успехе помечает "
         "заявки `cession_sent_at`/`cession_contract_number`. Батчи без `partner` в мапе "
         "возвращаются с `sent=false`. Пятница–воскресенье банк ждёт три отдельных запроса "
-        "в понедельник (по одному на каждый issue_date) — вызывающая сторона (cron) должна "
-        "вызвать этот эндпоинт трижды с разными `issue_date`."
+        "в понедельник (по одному на каждый issue_date) — вызывающая сторона должна "
+        "вызвать этот эндпоинт отдельно для каждой пары `issue_date` + `company_id`."
     ),
 )
 async def send_cession(
@@ -190,13 +269,35 @@ async def send_cession(
 )
 async def get_application(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[
         int,
-        Path(description="ID в installment_application_tab (product_type = FACTORING)", examples=[1]),
+        Path(
+            description="ID в installment_application_tab (product_type = FACTORING)", examples=[1]
+        ),
     ],
     service: FactoringServiceDep,
 ) -> FactoringApplicationResponse:
-    return await service.get_application_by_id(application_id)
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
+    return await service.get_application_for_client(application_id)
+
+
+@router.get(
+    "/applications/{application_id}/print-forms/{name}",
+    summary="PDF печатной формы (CRM proxy, Basic Auth + context)",
+)
+async def download_print_form_authenticated(
+    _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
+    application_id: Annotated[int, Path(examples=[1])],
+    name: str,
+    service: FactoringServiceDep,
+) -> Response:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
+    pdf = await service.download_print_form_authenticated(application_id, name)
+    return Response(content=pdf, media_type="application/pdf")
 
 
 @router.post(
@@ -206,10 +307,13 @@ async def get_application(
 )
 async def create_refund(
     _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
     application_id: Annotated[int, Path(examples=[29])],
     request: CreateFactoringRefundRequest,
     service: FactoringServiceDep,
 ) -> FactoringRefundResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
     return await service.create_refund(application_id, request)
 
 
@@ -249,6 +353,4 @@ async def webhook_factoring_refund(
     if body.__pydantic_extra__:
         payload.update(body.__pydantic_extra__)
     authorization_header = request.headers.get("Authorization")
-    return await service.handle_refund_webhook(
-        payload, authorization_header=authorization_header
-    )
+    return await service.handle_refund_webhook(payload, authorization_header=authorization_header)

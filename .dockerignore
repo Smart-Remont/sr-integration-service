@@ -1,0 +1,13 @@
+**/.env
+**/__pycache__
+**/*.pyc
+**/.ruff_cache
+**/.pytest_cache
+.venv
+.git
+app/tests
+app/graphify-out
+agent-memory
+docs
+sql
+**/node_modules

@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import os
-from typing import List
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in ("1", "true", "yes")
+
+
+def _list_env(name: str, default: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in os.getenv(name, default).split(",") if item.strip())
+
+
+def _first_nonempty_env(*names: str, default: str) -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return default.rstrip("/")
 
 
 class BigIntegrationAuthConfig:
@@ -31,6 +49,18 @@ class FactoringAuthConfig:
     )
 
 
+class IntegrationContextConfig:
+    """Signed proxy context (CRM → integrations-sr). See docs/integration-context.md."""
+
+    secret: str = os.getenv("INTEGRATION_CONTEXT_SECRET", "")
+    audience: str = os.getenv("INTEGRATION_CONTEXT_AUDIENCE", "integrations-sr")
+    issuer_allowlist: tuple[str, ...] = _list_env("INTEGRATION_CONTEXT_ISSUERS", "sr-crm")
+
+    @property
+    def is_enforced(self) -> bool:
+        return bool(self.secret.strip())
+
+
 class StorageAuthConfig:
     """Basic auth for /api/v1/storage/*. Falls back to installment creds if unset."""
 
@@ -52,13 +82,13 @@ class FactoringPrescoringConfig:
 
 
 class CORSConfig:
-    allow_origins: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
+    allow_origins: tuple[str, ...] = _list_env(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
     allow_credentials: bool = True
-    allow_methods: List[str] = ["*"]
-    allow_headers: List[str] = ["*"]
+    allow_methods: tuple[str, ...] = ("*",)
+    allow_headers: tuple[str, ...] = ("*",)
 
 
 class MyncaConfig:
@@ -85,6 +115,10 @@ class MyncaConfig:
 
 class AppConfig:
     env: str = os.getenv("APP_ENV", "stage")
+    version: str = os.getenv("APP_VERSION", "0.1.0")
+    # /scalar and /openapi.json. Off unless enabled: the schema lists every webhook
+    # and internal route, so production keeps it closed.
+    api_docs_enabled: bool = _bool_env("API_DOCS_ENABLED")
 
 
 class MinioConfig:
@@ -101,14 +135,6 @@ class MinioConfig:
         return bool(self.endpoint and self.access_key and self.secret_key and self.bucket)
 
 
-def _first_nonempty_env(*names: str, default: str) -> str:
-    for name in names:
-        value = (os.getenv(name) or "").strip()
-        if value:
-            return value.rstrip("/")
-    return default.rstrip("/")
-
-
 class FileStoreConfig:
     """Public URLs for stored files: STORAGE_PUBLIC_URL + `/documents/...`."""
 
@@ -122,9 +148,34 @@ class FileStoreConfig:
         return f"{self.public_base_url}{logical_path}"
 
 
+class KlRecognitionAuthConfig:
+    """Basic auth for /api/v1/kl_recognition/*. No fallback: empty → 503."""
+
+    username: str = os.getenv("KL_RECOGNITION_API_USER", "")
+    password: str = os.getenv("KL_RECOGNITION_API_PASSWORD", "")
+
+
+class KlRecognitionConfig:
+    """Apartment sheet (KL) recognition: BI loadSheet + Composer through the Cursor SDK."""
+
+    # Public BI endpoint rendering the KL PDF by flat GUID; no BI credentials needed.
+    load_sheet_url: str = os.getenv(
+        "BI_LOAD_SHEET_URL",
+        "https://apigw.bi.group/crm-document/api/placement/public/loadSheet",
+    )
+    # Cursor account key the agent runs under (Cursor dashboard → Integrations → API Keys).
+    cursor_api_key: str = os.getenv("CURSOR_API_KEY", "")
+    cursor_model: str = os.getenv("CURSOR_MODEL", "composer-2.5")
+    node_bin: str = os.getenv("KL_RECOGNITION_NODE_BIN", "node")
+    # One recognition takes 15–30 s; the limit guards against a hung agent run.
+    agent_timeout_seconds: int = int(os.getenv("KL_RECOGNITION_AGENT_TIMEOUT", "300"))
+    max_parallel: int = int(os.getenv("KL_RECOGNITION_MAX_PARALLEL", "4"))
+
+
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
 installment_auth_config = InstallmentAuthConfig()
+integration_context_config = IntegrationContextConfig()
 factoring_auth_config = FactoringAuthConfig()
 storage_auth_config = StorageAuthConfig()
 factoring_prescoring_config = FactoringPrescoringConfig()
@@ -132,3 +183,5 @@ mynca_config = MyncaConfig()
 app_config = AppConfig()
 minio_config = MinioConfig()
 file_store_config = FileStoreConfig()
+kl_recognition_auth_config = KlRecognitionAuthConfig()
+kl_recognition_config = KlRecognitionConfig()

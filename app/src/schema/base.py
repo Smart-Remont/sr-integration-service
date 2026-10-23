@@ -1,4 +1,3 @@
-from humps import camelize
 from pydantic import BaseModel as _BaseModel
 from pydantic import ConfigDict
 

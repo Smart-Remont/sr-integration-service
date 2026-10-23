@@ -1,26 +1,43 @@
 import re
 import uuid
-from collections.abc import Sequence
-from typing import TypeAlias
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Self
 
 from asyncpg import Connection, Record
 
+from src.database.pool import get_db_pool
 from src.exceptions import map_asyncpg_errors
 
-SpRow: TypeAlias = dict[str, object]
-SpRows: TypeAlias = list[SpRow]
-SpMultiResult: TypeAlias = dict[str, SpRows]
-SpResult: TypeAlias = SpRows | SpMultiResult
+type SpRow = dict[str, object]
+type SpRows = list[SpRow]
+type SpMultiResult = dict[str, SpRows]
+type SpResult = SpRows | SpMultiResult
 
-_FUNCTION_NAME_RE = re.compile(
-    r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$"
-)
+_FUNCTION_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
 _CURSOR_PLACEHOLDER_RE = re.compile(r"^@cur\d*$")
+
+
+def scalar_from_sp_rows(rows: SpRows) -> object | None:
+    """First column of the first row: the return value of a scalar stored function."""
+    if not rows:
+        return None
+    return next(iter(rows[0].values()))
 
 
 class BaseRepository:
     def __init__(self, connection: Connection) -> None:
         self.connection = connection
+
+    async def committed[T](self, action: Callable[[Self], Awaitable[T]]) -> T:
+        """Run ``action`` on its own pooled connection and commit it at once.
+
+        The request transaction rolls back on any HTTP error. Use this only for
+        writes that must survive that rollback: an audit/event log entry, or a
+        state change the external system already knows about (bank, MyNCA).
+        """
+        pool = await get_db_pool()
+        async with pool.acquire() as connection, connection.transaction():
+            return await action(type(self)(connection=connection))
 
     async def fetchrow(self, query: str, *args: object) -> Record | None:
         with map_asyncpg_errors():
@@ -89,13 +106,16 @@ class BaseRepository:
         session_user_id: int | None,
         module_code: str,
     ) -> None:
+        # Transaction-local (is_local = true): pooled connections are reused by other
+        # requests, so a session-level value would leak this user into their audit trail.
+        # Every call runs inside a transaction (DatabaseConnectionDep / committed()).
         if session_user_id is not None:
             await self.connection.fetchval(
-                "select set_config('myapp.user_id', $1, false)",
+                "select set_config('myapp.user_id', $1, true)",
                 str(session_user_id),
             )
         await self.connection.fetchval(
-            "select set_config('myapp.module_code', $1, false)",
+            "select set_config('myapp.module_code', $1, true)",
             module_code,
         )
 

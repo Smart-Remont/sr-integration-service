@@ -1,5 +1,7 @@
+import base64
 import json
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, ClassVar
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -7,14 +9,18 @@ from loguru import logger
 
 
 class FFClientError(Exception):
-    def __init__(self, status_code: int, detail: str) -> None:
+    """`maybe_sent` — the request may have reached the bank (read timeout,
+    dropped connection, 5xx): the bank could have acted on it."""
+
+    def __init__(self, status_code: int, detail: str, *, maybe_sent: bool = False) -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        self.maybe_sent = maybe_sent
 
 
 class FFClient:
-    _DEFAULT_HEADERS = {
+    _DEFAULT_HEADERS: ClassVar[dict[str, str]] = {
         "Accept": "application/json",
         "User-Agent": "SmartRemont-integrations-sr/1.0",
     }
@@ -67,9 +73,13 @@ class FFClient:
         access = response.get("access")
         refresh = response.get("refresh")
         if not isinstance(access, str) or not access:
-            raise FFClientError(status_code=502, detail="Freedom Finance did not return access token.")
+            raise FFClientError(
+                status_code=502, detail="Freedom Finance did not return access token."
+            )
         if refresh is not None and not isinstance(refresh, str):
-            raise FFClientError(status_code=502, detail="Freedom Finance returned invalid refresh token.")
+            raise FFClientError(
+                status_code=502, detail="Freedom Finance returned invalid refresh token."
+            )
         return access, refresh
 
     async def get_partner_info(
@@ -171,14 +181,21 @@ class FFClient:
                     extensions=extensions,
                 )
         except httpx.RequestError as exc:
+            # Connect/pool errors happen before the request leaves us; anything
+            # later (read timeout, dropped connection) may have reached the bank.
+            not_sent = isinstance(
+                exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+            )
             logger.error(
-                "FF HTTP transport error | connect_url={url} error={error}",
+                "FF HTTP transport error | connect_url={url} error={error} maybe_sent={maybe_sent}",
                 url=connect_url,
-                error=exc,
+                error=repr(exc),
+                maybe_sent=not not_sent,
             )
             raise FFClientError(
-                status_code=502,
-                detail=f"Freedom Finance request failed: {exc}",
+                status_code=503 if not_sent else 504,
+                detail=f"Freedom Finance request failed: {exc!r}",
+                maybe_sent=not not_sent,
             ) from exc
 
         logger.info(
@@ -190,7 +207,9 @@ class FFClient:
         return self._parse_response(response, resolve_ip=resolve_ip)
 
     @staticmethod
-    def _parse_response(response: httpx.Response, *, resolve_ip: str | None = None) -> dict[str, Any]:
+    def _parse_response(
+        response: httpx.Response, *, resolve_ip: str | None = None
+    ) -> dict[str, Any]:
         try:
             payload = response.json()
         except ValueError:
@@ -198,14 +217,21 @@ class FFClient:
 
         if response.is_success:
             if not isinstance(payload, dict):
-                raise FFClientError(status_code=502, detail="Freedom Finance returned invalid JSON payload.")
+                raise FFClientError(
+                    status_code=502,
+                    detail="Freedom Finance returned invalid JSON payload.",
+                    maybe_sent=True,
+                )
             return payload
 
         detail: str
         if isinstance(payload, dict):
             message = payload.get("message") or payload.get("detail")
+            field_errors = FFClient._field_errors(payload)
             if isinstance(message, str) and message.strip():
                 detail = message
+            elif field_errors:
+                detail = f"Банк отклонил заявку: {field_errors}"
             else:
                 detail = "Freedom Finance request failed."
         else:
@@ -230,7 +256,36 @@ class FFClient:
             detail=detail,
             body=FFClient._truncate_response_body(response),
         )
-        raise FFClientError(status_code=response.status_code, detail=detail)
+        raise FFClientError(
+            status_code=response.status_code,
+            detail=detail,
+            maybe_sent=response.status_code >= 500,
+        )
+
+    @staticmethod
+    def _field_errors(payload: dict[str, Any]) -> str:
+        """DRF-style validation answer: {"partner": ["Обязательное поле."]}."""
+        parts = []
+        for key, value in payload.items():
+            if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+                parts.append(f"{key}: {' '.join(value)}")
+        return "; ".join(parts)
+
+    @staticmethod
+    def access_token_expires_at(access_token: str) -> datetime | None:
+        """`exp` from the JWT payload (not verified — only to know when to re-login)."""
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            return None
+        try:
+            padded = parts[1] + "=" * (-len(parts[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(padded))
+            exp = claims.get("exp") if isinstance(claims, dict) else None
+            if isinstance(exp, (int, float)) and exp > 0:
+                return datetime.fromtimestamp(exp, tz=UTC)
+        except ValueError, TypeError:
+            return None
+        return None
 
     @staticmethod
     def _mask_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
@@ -252,7 +307,9 @@ class FFClient:
             masked: dict[str, Any] = {}
             for key, value in body.items():
                 key_lower = key.lower() if isinstance(key, str) else ""
-                if any(marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")):
+                if any(
+                    marker in key_lower for marker in ("iin", "phone", "mobile_phone", "password")
+                ):
                     masked[key] = "***"
                 elif (
                     key_lower in ("document", "digital_signature", "public_key", "file_content")

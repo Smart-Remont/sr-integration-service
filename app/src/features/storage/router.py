@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+
 from src.config import file_store_config, minio_config
 from src.routers.config import api_prefix_config
 from src.storage.file_store import (
@@ -86,7 +87,9 @@ async def list_storage_modes(_: StorageBasicAuthDep) -> FileStoreModesResponse:
             "content": {
                 "application/json": {
                     "examples": {
-                        "unknown_mode": {"value": {"detail": "Unknown mode: NOPE. Allowed: CARD_FILES, ..."}},
+                        "unknown_mode": {
+                            "value": {"detail": "Unknown mode: NOPE. Allowed: CARD_FILES, ..."}
+                        },
                         "empty_file": {"value": {"detail": "Empty file"}},
                     }
                 }
@@ -94,7 +97,11 @@ async def list_storage_modes(_: StorageBasicAuthDep) -> FileStoreModesResponse:
         },
         502: {
             "description": "MinIO недоступен или вернул ошибку",
-            "content": {"application/json": {"example": {"detail": "MinIO upload failed for mode=MATERIAL_PHOTO"}}},
+            "content": {
+                "application/json": {
+                    "example": {"detail": "MinIO upload failed for mode=MATERIAL_PHOTO"}
+                }
+            },
         },
         503: {
             "description": "MinIO не сконфигурирован (MINIO_*)",

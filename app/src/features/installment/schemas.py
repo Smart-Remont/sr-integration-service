@@ -2,7 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
+
 from src.schema import BaseSchema
 
 from .openapi_examples import (
@@ -28,11 +29,33 @@ class FFRepaymentCondition(BaseSchema):
     periods: list[int]
     principal_limits: FFPrincipalLimits
 
+    @model_validator(mode="before")
+    @classmethod
+    def _flat_limits(cls, data: Any) -> Any:
+        # The bank's docs show both {"principal_limits": {"min", "max"}} and
+        # {"min", "max"} right in the condition; we always answer with the first.
+        if (
+            isinstance(data, dict)
+            and "principal_limits" not in data
+            and "min" in data
+            and "max" in data
+        ):
+            data = {**data, "principal_limits": {"min": data["min"], "max": data["max"]}}
+        return data
+
 
 class FFProduct(BaseSchema):
     product_id: str
     repayment_method: str
     repayment: list[FFRepaymentCondition]
+
+    @model_validator(mode="after")
+    def _normalize_method(self) -> FFProduct:
+        # The bank's examples spell installment as INSTALMENT; CRM and the
+        # catalog use INSTALLMENT.
+        method = self.repayment_method.strip().upper()
+        self.repayment_method = "INSTALLMENT" if method == "INSTALMENT" else method
+        return self
 
 
 class SyncProductsResponse(BaseSchema):
@@ -46,6 +69,13 @@ class SyncProductsResponse(BaseSchema):
     inserted: int
     closed: int
     unchanged: int
+    relinked: int = Field(
+        default=0, description="Сколько банков перенесено на новую строку продукта"
+    )
+    orphaned_bank_ids: list[int] = Field(
+        default_factory=list,
+        description="Банки, чей продукт банк убрал: в рассрочке их не будет, пока не перепривязать",
+    )
     ids: list[int]
 
 
@@ -96,7 +126,7 @@ class FFProductsResponse(BaseSchema):
 
 
 class InstallmentApplicationListResponse(BaseSchema):
-    items: list["InstallmentApplicationResponse"]
+    items: list[InstallmentApplicationResponse]
     total: int
 
 
@@ -156,6 +186,10 @@ class CreateInstallmentApplicationResponse(BaseSchema):
     reference_id: str
     status: str
     redirect_url: str | None = None
+    redirect_qr: str | None = Field(
+        default=None,
+        description="QR-код redirect_url как data:image/svg+xml — рисуется у нас, ссылка не уходит наружу",
+    )
     provider_code: str
 
 
@@ -184,6 +218,8 @@ class InstallmentApplicationResponse(BaseSchema):
     bank_name: str | None = None
     installment_product_id: int | None = None
     client_request_credit_detail_id: int | None = None
+    credit_contract: str | None = None
+    issued_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -238,6 +274,15 @@ class FFWebhookPayload(BaseSchema):
     product: str | None = Field(default=None, examples=["SR_MOCK_FACT_12"])
     redirect_url: str | None = None
     alternative_reason: str | None = Field(default=None, examples=[""])
+
+
+class ReconcileResponse(BaseSchema):
+    checked: int = Field(description="Сколько заявок взято на сверку")
+    polled: int = Field(description="Сколько статусов запрошено у банка")
+    changed: int = Field(description="У скольких заявок изменился статус")
+    applied: int = Field(description="Сколько выданных заявок записано в сделку")
+    expired: int = Field(description="Сколько заявок без ответа банка закрыто как неотправленные")
+    errors: int = Field(description="Сколько заявок не удалось сверить")
 
 
 class WebhookAckResponse(BaseSchema):

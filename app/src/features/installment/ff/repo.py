@@ -4,8 +4,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from src.features.big_integration.db import scalar_from_sp_rows
-from src.repository import BaseRepository
+from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.deal_guard import fetch_deal_client_request_state
 
 from ..schemas import InstallmentApplicationResponse
 
@@ -144,6 +144,8 @@ class FFRepository(BaseRepository):
         principal: Decimal,
         period: int,
         created_by: int,
+        iin: str,
+        mobile_phone: str,
         installment_product_id: int | None = None,
         status: str = "NEW",
     ) -> int:
@@ -156,6 +158,8 @@ class FFRepository(BaseRepository):
             "principal": str(principal),
             "period": period,
             "created_by": created_by,
+            "iin": iin,
+            "mobile_phone": mobile_phone,
             "status": status,
         }
         if installment_product_id is not None:
@@ -204,6 +208,25 @@ class FFRepository(BaseRepository):
             )
         )
 
+    async def mark_apply_unknown(self, application_id: int) -> None:
+        scalar_from_sp_rows(
+            await self.call_sp(
+                "public.installment__application_mark_apply_unknown",
+                json.dumps({"application_id": application_id}),
+                module_code="MYSPACE",
+            )
+        )
+
+    async def list_for_reconcile(self, *, stale_minutes: int, limit: int) -> list[dict[str, Any]]:
+        rows = await self.call_sp(
+            "public.installment__applications_for_reconcile",
+            stale_minutes,
+            limit,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        return [dict(row) for row in rows]
+
     async def insert_event_log(
         self,
         *,
@@ -244,7 +267,9 @@ class FFRepository(BaseRepository):
             result.append(InstallmentApplicationResponse.model_validate(payload))
         return result
 
-    async def get_application_by_id(self, application_id: int) -> InstallmentApplicationResponse | None:
+    async def get_application_by_id(
+        self, application_id: int
+    ) -> InstallmentApplicationResponse | None:
         rows = await self.call_sp(
             "public.installment__application_get",
             application_id,
@@ -284,22 +309,18 @@ class FFRepository(BaseRepository):
         factoring/ff/repo.py). Several hunters can work the same deal in
         parallel — their combined principal must not exceed the deal amount."""
         row = await self.fetchrow(
-            "SELECT public.cr_deal_committed_amount($1, $2) AS committed",
+            "SELECT public.cr_deal_committed_amount($1::bigint, $2::bigint) AS committed",
             client_request_id,
             exclude_application_id,
         )
         return Decimal(str(row["committed"])) if row is not None else Decimal("0")
 
-    async def client_request_exists(self, client_request_id: int) -> bool:
-        rows = await self.call_sp(
-            "public.installment__client_request_get_for_apply",
-            client_request_id,
-            cursor=True,
-            module_code="MYSPACE",
-        )
-        return bool(rows)
+    async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
+        return await fetch_deal_client_request_state(self, client_request_id)
 
-    async def get_provider_webhook_credentials(self, code: str = "FF") -> FFWebhookCredential | None:
+    async def get_provider_webhook_credentials(
+        self, code: str = "FF"
+    ) -> FFWebhookCredential | None:
         rows = await self.call_sp(
             "public.installment__provider_webhook_credentials_get",
             code,
@@ -358,6 +379,8 @@ class FFRepository(BaseRepository):
         product_id: str | None,
         loan_type: str | None,
         redirect_url: str | None,
+        credit_contract: str | None = None,
+        issued_at: str | None = None,
     ) -> None:
         payload = {
             "application_id": application_id,
@@ -367,6 +390,8 @@ class FFRepository(BaseRepository):
             "product_id": product_id,
             "loan_type": loan_type,
             "redirect_url": redirect_url,
+            "credit_contract": credit_contract,
+            "issued_at": issued_at,
         }
         scalar_from_sp_rows(
             await self.call_sp(
@@ -385,6 +410,7 @@ class FFRepository(BaseRepository):
         product_id: str | None,
         loan_type: str | None,
         uuid: str | None = None,
+        credit_contract: str | None = None,
     ) -> None:
         payload = {
             "application_id": application_id,
@@ -393,6 +419,7 @@ class FFRepository(BaseRepository):
             "product_id": product_id,
             "loan_type": loan_type,
             "uuid": uuid,
+            "credit_contract": credit_contract,
         }
         scalar_from_sp_rows(
             await self.call_sp(

@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends
+
 from src.database.deps import DatabaseConnectionDep
 
 from .repo import RepairPackPricesRepository

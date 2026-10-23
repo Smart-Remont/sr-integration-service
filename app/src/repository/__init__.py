@@ -1,3 +1,3 @@
-__all__ = ("BaseRepository",)
+__all__ = ("BaseRepository", "scalar_from_sp_rows")
 
-from .base import BaseRepository
+from .base import BaseRepository, scalar_from_sp_rows

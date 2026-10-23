@@ -4,8 +4,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from src.features.big_integration.db import scalar_from_sp_rows
-from src.repository import BaseRepository
+from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.deal_guard import fetch_deal_client_request_state
 
 from ..schemas import FactoringApplicationResponse
 
@@ -85,7 +85,9 @@ class FactoringRepository(BaseRepository):
             config=config,
         )
 
-    async def get_active_credentials(self, provider_id: int, env: str) -> FactoringCredential | None:
+    async def get_active_credentials(
+        self, provider_id: int, env: str
+    ) -> FactoringCredential | None:
         rows = await self.call_sp(
             "public.factoring__credential_get_active",
             provider_id,
@@ -248,6 +250,63 @@ class FactoringRepository(BaseRepository):
             )
         )
 
+    async def update_application_prescoring(
+        self,
+        *,
+        application_id: int,
+        prescoring_status: str | None,
+        prescoring_score: Decimal | None,
+        prescoring_message: str | None,
+        prescoring_max_limit: Decimal | None,
+        prescoring_checked_at: datetime | None,
+        status: str | None = None,
+    ) -> None:
+        await self.execute(
+            """
+            UPDATE installment_application_tab
+            SET prescoring_status = $2,
+                prescoring_score = $3,
+                prescoring_message = $4,
+                prescoring_max_limit = $5,
+                prescoring_checked_at = $6,
+                status = coalesce($7, status),
+                updated_at = now()
+            WHERE id = $1
+              AND product_type = 'FACTORING'
+            """,
+            application_id,
+            prescoring_status,
+            prescoring_score,
+            prescoring_message,
+            prescoring_max_limit,
+            prescoring_checked_at,
+            status,
+        )
+
+    async def reject_application_on_prescoring_committed(
+        self,
+        *,
+        application_id: int,
+        prescoring_status: str | None,
+        prescoring_score: Decimal | None,
+        prescoring_message: str | None,
+        prescoring_max_limit: Decimal | None,
+        prescoring_checked_at: datetime | None,
+    ) -> None:
+        """Committed at once: the service raises 422 right after, which rolls
+        back the request transaction."""
+        await self.committed(
+            lambda repo: repo.update_application_prescoring(
+                application_id=application_id,
+                prescoring_status=prescoring_status,
+                prescoring_score=prescoring_score,
+                prescoring_message=prescoring_message,
+                prescoring_max_limit=prescoring_max_limit,
+                prescoring_checked_at=prescoring_checked_at,
+                status="REJECTED",
+            )
+        )
+
     async def insert_event_log(
         self,
         *,
@@ -279,20 +338,16 @@ class FactoringRepository(BaseRepository):
         payload: dict[str, Any],
         source: str,
     ) -> None:
-        """Write audit on a separate connection so a later HTTP 422 rollback
-        does not erase CESSION_REQUEST / bank error details."""
-        from src.database.pool import get_db_pool
-
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                await other.insert_event_log(
-                    factoring_id=factoring_id,
-                    event_type=event_type,
-                    payload=payload,
-                    source=source,
-                )
+        """Committed at once so a later HTTP 422 rollback does not erase
+        CESSION_REQUEST / bank error details."""
+        await self.committed(
+            lambda repo: repo.insert_event_log(
+                factoring_id=factoring_id,
+                event_type=event_type,
+                payload=payload,
+                source=source,
+            )
+        )
 
     def _row_to_application(self, row: dict[str, Any]) -> FactoringApplicationResponse:
         payload = dict(row)
@@ -301,7 +356,9 @@ class FactoringRepository(BaseRepository):
                 payload[key] = json.loads(payload[key])
         return FactoringApplicationResponse.model_validate(payload)
 
-    async def get_application_by_id(self, application_id: int) -> FactoringApplicationResponse | None:
+    async def get_application_by_id(
+        self, application_id: int
+    ) -> FactoringApplicationResponse | None:
         rows = await self.call_sp(
             "public.factoring__application_get",
             application_id,
@@ -311,6 +368,33 @@ class FactoringRepository(BaseRepository):
         if not rows:
             return None
         return self._row_to_application(dict(rows[0]))
+
+    async def get_application_by_sign_process_id(
+        self, sign_process_id: str
+    ) -> FactoringApplicationResponse | None:
+        row = await self.fetchrow(
+            """
+            SELECT id
+            FROM installment_application_tab
+            WHERE product_type = 'FACTORING'
+              AND EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(
+                      CASE
+                          WHEN jsonb_typeof(print_forms) = 'array' THEN print_forms
+                          ELSE '[]'::jsonb
+                      END
+                  ) AS form
+                  WHERE form->>'sign_process_id' = $1
+              )
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            sign_process_id,
+        )
+        if row is None:
+            return None
+        return await self.get_application_by_id(int(row["id"]))
 
     async def get_applications_by_client_request(
         self, client_request_id: int
@@ -323,19 +407,8 @@ class FactoringRepository(BaseRepository):
         )
         return [self._row_to_application(dict(row)) for row in rows]
 
-    async def get_client_request_contacts(
-        self, client_request_id: int
-    ) -> dict[str, Any] | None:
-        rows = await self.call_sp(
-            "public.factoring__client_request_get_for_apply",
-            client_request_id,
-            cursor=True,
-            module_code="MYSPACE",
-        )
-        return dict(rows[0]) if rows else None
-
-    async def client_request_exists(self, client_request_id: int) -> bool:
-        return await self.get_client_request_contacts(client_request_id) is not None
+    async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
+        return await fetch_deal_client_request_state(self, client_request_id)
 
     async def get_deal_total_amount(self, client_request_id: int) -> Decimal | None:
         row = await self.fetchrow(
@@ -361,11 +434,24 @@ class FactoringRepository(BaseRepository):
         installment/ff/repo.py). Several hunters can work the same deal in
         parallel — their combined principal must not exceed the deal amount."""
         row = await self.fetchrow(
-            "SELECT public.cr_deal_committed_amount($1, $2) AS committed",
+            "SELECT public.cr_deal_committed_amount($1::bigint, $2::bigint) AS committed",
             client_request_id,
             exclude_application_id,
         )
         return Decimal(str(row["committed"])) if row is not None else Decimal("0")
+
+    async def get_deal_prop_iin(self, client_request_id: int) -> str | None:
+        row = await self.fetchrow(
+            """
+            SELECT prop_iin
+            FROM client_request_tab
+            WHERE client_request_id = $1
+            """,
+            client_request_id,
+        )
+        if row is None or row["prop_iin"] is None:
+            return None
+        return str(row["prop_iin"])
 
     async def get_client_request_company_id(self, client_request_id: int) -> int | None:
         row = await self.fetchrow(
@@ -569,20 +655,39 @@ class FactoringRepository(BaseRepository):
         sign_process_id: str | None = None,
         sign_group_id: str | None = None,
     ) -> int:
-        """Stamp cession on a separate connection so a later rollback
-        does not un-mark applications the bank already accepted."""
-        from src.database.pool import get_db_pool
+        """Committed at once so a later rollback does not un-mark applications
+        the bank already accepted."""
+        return await self.committed(
+            lambda repo: repo.mark_cession_sent(
+                application_ids,
+                contract_number,
+                sign_process_id=sign_process_id,
+                sign_group_id=sign_group_id,
+            )
+        )
 
-        pool = await get_db_pool()
-        async with pool.acquire() as connection:
-            other = FactoringRepository(connection=connection)
-            async with connection.transaction():
-                return await other.mark_cession_sent(
-                    application_ids,
-                    contract_number,
-                    sign_process_id=sign_process_id,
-                    sign_group_id=sign_group_id,
-                )
+    async def unmark_cession_sent_committed(
+        self,
+        application_ids: list[int],
+        contract_number: str | None = None,
+    ) -> int:
+        """Committed at once: the request transaction rolls back when the service
+        raises after a bank rejection, which would undo an un-mark done on it."""
+        return await self.committed(
+            lambda repo: repo.unmark_cession_sent(application_ids, contract_number)
+        )
+
+    async def list_cession_contract_numbers(self, prefix: str) -> list[str]:
+        rows = await self.fetch(
+            """
+            SELECT DISTINCT cession_contract_number
+            FROM installment_application_tab
+            WHERE product_type = 'FACTORING'
+              AND cession_contract_number LIKE $1 || '%'
+            """,
+            prefix,
+        )
+        return [row["cession_contract_number"] for row in rows]
 
     async def unmark_cession_sent(
         self,
@@ -665,6 +770,31 @@ class FactoringRepository(BaseRepository):
         )
         if scalar_result is None:
             raise RuntimeError("Failed to update factoring refund.")
+        return int(scalar_result)
+
+    async def apply_application_to_deal(
+        self,
+        *,
+        application_id: int,
+        created_by: int,
+    ) -> int:
+        """Create client_request_credit_detail_tab row for an ISSUED application
+        and link it back (shared with installment — see
+        public.cr_credit_detail__insert_from_installment)."""
+        payload = {
+            "application_id": application_id,
+            "created_by": created_by,
+        }
+        scalar_result = scalar_from_sp_rows(
+            await self.call_sp(
+                "public.cr_credit_detail__insert_from_installment",
+                json.dumps(payload),
+                session_user_id=created_by,
+                module_code="MYSPACE",
+            )
+        )
+        if scalar_result is None:
+            raise RuntimeError("Failed to apply factoring application to deal.")
         return int(scalar_result)
 
     async def update_print_forms(

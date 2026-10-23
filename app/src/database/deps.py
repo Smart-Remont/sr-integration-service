@@ -9,10 +9,9 @@ from .pool import get_db_pool
 
 async def get_db_connection(
     db_pool: Annotated[Pool, Depends(get_db_pool)],
-) -> AsyncGenerator[Connection, None]:
-    async with db_pool.acquire() as connection:
-        async with connection.transaction():
-            yield connection
+) -> AsyncGenerator[Connection]:
+    async with db_pool.acquire() as connection, connection.transaction():
+        yield connection
 
 
 DatabaseConnectionDep = Annotated[

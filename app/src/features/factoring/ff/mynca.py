@@ -54,7 +54,7 @@ class MyncaClient:
             import base64
 
             return base64.b64decode(pdf_b64)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise MyncaClientError("MyNCA docx-to-pdf returned invalid PDF.") from exc
 
     async def sign_create(
@@ -88,6 +88,40 @@ class MyncaClient:
         if not isinstance(sign_process_id, str) or not sign_process_id:
             raise MyncaClientError("MyNCA sign/create did not return sign_process_id.")
         return sign_url, sign_process_id
+
+    async def sign_batch(
+        self,
+        *,
+        documents: list[dict[str, Any]],
+        back_url: str,
+        return_url: str,
+        exp_minutes: int = 60,
+        atomic: bool = True,
+    ) -> tuple[str, list[dict[str, str | None]]]:
+        """POST /sign/batch/create — one client signature for several PDFs.
+
+        ``atomic`` rolls every document back when the back_url rejects any of them.
+        """
+        import base64
+
+        payload = {
+            "documents": [
+                {
+                    "file_name": item["file_name"],
+                    "file_content": base64.b64encode(item["pdf_bytes"]).decode("ascii"),
+                    "ext_id": item["ext_id"],
+                    "meta_data": item.get("meta_data") or {},
+                }
+                for item in documents
+            ],
+            "back_url": back_url,
+            "return_url": return_url,
+            "exp_minutes": exp_minutes,
+            "atomic": atomic,
+            "sign_doc_method": "cms",
+        }
+        body = await self._request_json("POST", "/sign/batch/create", json=payload)
+        return parse_sign_batch_response(body)
 
     async def sign_status(self, sign_process_id: str) -> dict[str, Any]:
         body = await self._request_json(
@@ -150,7 +184,7 @@ class MyncaClient:
             import base64
 
             return base64.b64decode(cms_b64)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise MyncaClientError("MyNCA cms/sign returned invalid CMS.") from exc
 
     async def cms_sign_save(
@@ -184,15 +218,47 @@ class MyncaClient:
         if group_id:
             payload["group_id"] = group_id
         body = await self._request_json("POST", "/cms/sign-save", json=payload)
-        sign_process_id = body.get("sign_process_id")
+        data = _unwrap_data(body)
+        sign_process_id = data.get("sign_process_id") or body.get("sign_process_id")
         if not isinstance(sign_process_id, str) or not sign_process_id:
             raise MyncaClientError("MyNCA cms/sign-save did not return sign_process_id.")
-        return body
+        return {
+            "sign_process_id": sign_process_id,
+            "dn_name": str(data.get("dn_name") or body.get("dn_name") or ""),
+            "group_id": data.get("group_id") or body.get("group_id"),
+        }
 
     async def download_cms(self, sign_process_id: str) -> bytes:
         """Fetches the raw CMS (PKCS#7) blob for a sign_process_id created via
         cms/sign-save."""
         return await self._request_bytes("GET", f"/sign/{sign_process_id}/download-cms")
+
+    async def sign_rollback(self, sign_process_id: str) -> None:
+        """POST /sign/{id}/rollback — undo a persisted cms/sign-save on MyNCA failure."""
+        await self._request_json("POST", f"/sign/{sign_process_id}/rollback")
+
+    async def pkcs12_validate(
+        self,
+        *,
+        key_b64: str,
+        password: str,
+        key_alias: str | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "key": key_b64,
+            "password": password,
+            "revocationCheck": ["OCSP", "CRL"],
+        }
+        if key_alias:
+            payload["keyAlias"] = key_alias
+        body = await self._request_json("POST", "/pkcs12/info", json=payload)
+        data = _unwrap_data(body)
+        if data.get("valid") is True:
+            return True
+        certificate = body.get("certificate")
+        if isinstance(certificate, dict) and certificate.get("valid") is True:
+            return True
+        return False
 
     async def _request_json(
         self,
@@ -222,9 +288,7 @@ class MyncaClient:
     async def _request_bytes(self, method: str, path: str) -> bytes:
         response = await self._request(method, path, json=None)
         if response.status_code >= 400:
-            raise MyncaClientError(
-                f"MyNCA {path} failed (HTTP {response.status_code})."
-            )
+            raise MyncaClientError(f"MyNCA {path} failed (HTTP {response.status_code}).")
         content_type = response.headers.get("content-type", "")
         if "application/json" in content_type:
             body = response.json()
@@ -271,6 +335,43 @@ def _b64(data: bytes) -> str:
     import base64
 
     return base64.b64encode(data).decode("ascii")
+
+
+def parse_sign_batch_response(
+    body: dict[str, Any],
+) -> tuple[str, list[dict[str, str | None]]]:
+    data = _unwrap_data(body)
+    sign_url = data.get("sign_url") if isinstance(data.get("sign_url"), str) else None
+    if not sign_url:
+        sign_url = body.get("sign_url") if isinstance(body.get("sign_url"), str) else None
+    if not sign_url or not sign_url.strip():
+        raise MyncaClientError("MyNCA sign/batch did not return sign_url.")
+
+    raw_documents = data.get("documents")
+    if not isinstance(raw_documents, list):
+        raw_documents = body.get("documents")
+    if not isinstance(raw_documents, list) or not raw_documents:
+        raise MyncaClientError("MyNCA sign/batch did not return documents.")
+
+    parsed: list[dict[str, str | None]] = []
+    for item in raw_documents:
+        if not isinstance(item, dict):
+            raise MyncaClientError("MyNCA sign/batch returned a document that is not an object.")
+        sign_process_id = item.get("sign_process_id")
+        if not isinstance(sign_process_id, str) or not sign_process_id.strip():
+            raise MyncaClientError("MyNCA sign/batch document is missing sign_process_id.")
+        file_name = item.get("file_name")
+        group_id = item.get("group_id")
+        parsed.append(
+            {
+                "file_name": file_name.strip() if isinstance(file_name, str) else None,
+                "sign_process_id": sign_process_id.strip(),
+                "group_id": group_id.strip()
+                if isinstance(group_id, str) and group_id.strip()
+                else None,
+            }
+        )
+    return sign_url.strip(), parsed
 
 
 def _unwrap_data(body: dict[str, Any]) -> dict[str, Any]:

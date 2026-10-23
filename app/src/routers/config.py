@@ -1,9 +1,9 @@
 class APIV1PrefixConfig:
     prefix: str = "/v1"
-    ddu_contractors: str = "/ddu_contractors"
     installment_ff: str = "/installment/ff"
     factoring_ff: str = "/factoring/ff"
     storage: str = "/storage"
+    kl_recognition: str = "/kl_recognition"
 
 
 class APIBigIntegrationPrefixConfig:

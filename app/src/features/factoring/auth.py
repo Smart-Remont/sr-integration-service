@@ -1,38 +1,10 @@
-from secrets import compare_digest
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends
+
 from src.config import factoring_auth_config
-
-security = HTTPBasic()
-
-
-def verify_factoring_basic_auth(
-    credentials: Annotated[HTTPBasicCredentials, Depends(security)],
-) -> None:
-    if not (factoring_auth_config.username and factoring_auth_config.password):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Factoring API credentials are not configured.",
-        )
-    username_ok = compare_digest(
-        credentials.username.encode(),
-        factoring_auth_config.username.encode(),
-    )
-    password_ok = compare_digest(
-        credentials.password.encode(),
-        factoring_auth_config.password.encode(),
-    )
-    if not (username_ok and password_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-
+from src.security import basic_auth_dependency
 
 FactoringBasicAuthDep = Annotated[
-    None,
-    Depends(verify_factoring_basic_auth),
+    None, Depends(basic_auth_dependency(factoring_auth_config, api_name="Factoring"))
 ]
