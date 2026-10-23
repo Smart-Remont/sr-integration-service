@@ -2,7 +2,7 @@
 
 Единственный файл с правилами репозитория для людей и ИИ-агентов. [AGENTS.md](AGENTS.md) ссылается сюда, [README.md](README.md) — только запуск.
 
-Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: Freedom Finance (рассрочка и факторинг), MyNCA (подписи), BIG Integration (API ДДУ для BI Group), загрузка файлов в MinIO. Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
+Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: Freedom Finance (рассрочка и факторинг), MyNCA (подписи), BIG Integration (API ДДУ для BI Group), загрузка файлов в MinIO, распознавание квартирных листов BI (`kl_recognition`: Composer через Cursor SDK, помощник на Node в `composer_sdk/`, без БД). Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
 
 Общие правила Smart Remont (базы, SQL, ветки других репо, агенты) — `../myspace/CLAUDE.md`. Агент для этого репо — `smart-remont:integrations-dev`. Состояние и выкатка Freedom — `../myspace/features/freedom-factoring/STATUS.md` и `../myspace/sql/freedom-factoring/PROD_APPLY_TODO.md`. Локальные папки `sql/`, `agent-memory/`, `docs/` в `.gitignore`: это ссылки на `../myspace/sql/` и `../myspace/features/`, новые файлы кладутся туда.
 

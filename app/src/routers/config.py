@@ -3,6 +3,7 @@ class APIV1PrefixConfig:
     installment_ff: str = "/installment/ff"
     factoring_ff: str = "/factoring/ff"
     storage: str = "/storage"
+    kl_recognition: str = "/kl_recognition"
 
 
 class APIBigIntegrationPrefixConfig:

@@ -1,0 +1,10 @@
+{
+  "name": "kl-recognition-composer",
+  "private": true,
+  "description": "Runs Composer through the Cursor SDK for KL recognition; called by composer.py",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "@cursor/sdk": "1.0.40"
+  }
+}

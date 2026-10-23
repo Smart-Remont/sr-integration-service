@@ -14,10 +14,25 @@ RUN uv sync --frozen --no-dev --no-cache --no-install-project
 
 COPY ./app .
 
+# KL recognition runs Composer through the Cursor SDK, which is a Node.js package.
+FROM node:22.23.4-trixie-slim AS composer_sdk
+
+WORKDIR /sdk
+
+COPY ./app/src/features/kl_recognition/composer_sdk/package.json \
+     ./app/src/features/kl_recognition/composer_sdk/package-lock.json ./
+
+RUN npm ci --omit=dev --no-audit --no-fund
+
 FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
+
+# OpenCV (KL plan cropping) needs these at runtime even in the headless build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --no-create-home --uid 10001 app
 
@@ -26,6 +41,9 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.14 /usr/local/lib/python3.14
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder --chown=app:app /app /app
+COPY --from=composer_sdk /usr/local/bin/node /usr/local/bin/node
+COPY --from=composer_sdk --chown=app:app /sdk/node_modules \
+     /app/src/features/kl_recognition/composer_sdk/node_modules
 
 USER app
 

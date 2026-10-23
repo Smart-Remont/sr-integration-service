@@ -10,3 +10,4 @@ app/graphify-out
 agent-memory
 docs
 sql
+**/node_modules

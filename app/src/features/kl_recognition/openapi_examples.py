@@ -1,0 +1,55 @@
+RECOGNIZE_REQUEST = {
+    "by_flat_guid": {
+        "summary": "По GUID квартиры",
+        "value": {"flat_guid": "141754c1-b8cb-4f1d-8e4c-bc02a9d6c37d", "bi_area": 91.67},
+    },
+    "by_pdf_url": {
+        "summary": "По ссылке на PDF",
+        "value": {"pdf_url": "https://example.com/kl.pdf", "bi_area": 91.67},
+    },
+}
+
+RECOGNIZE_AUTO = {
+    "status": "auto",
+    "reason": "сумма комнат 91.67 = лист 91.67 = BI 91.67",
+    "rooms": [
+        {"name": "Кухня", "area": 11.19, "financial_area": 11.19},
+        {"name": "Кладовая", "area": 3.16, "financial_area": 3.16},
+        {"name": "Гардероб", "area": 2.18, "financial_area": 2.18},
+        {"name": "Гостиная", "area": 20.85, "financial_area": 20.85},
+        {"name": "Лоджия", "area": 3.08, "financial_area": 1.54},
+        {"name": "Спальня", "area": 15.22, "financial_area": 15.22},
+        {"name": "Ванная", "area": 4.18, "financial_area": 4.18},
+        {"name": "Холл", "area": 14.53, "financial_area": 14.53},
+        {"name": "С/у", "area": 3.41, "financial_area": 3.41},
+        {"name": "Мастер спальня", "area": 15.41, "financial_area": 15.41},
+    ],
+    "total_area": 91.67,
+    "total_rooms": 3,
+    "checks": {
+        "rooms_sum": 91.67,
+        "sheet_total": 91.67,
+        "sheet_ok": True,
+        "bi_area": 91.67,
+        "bi_ok": True,
+    },
+    "doubts": [],
+    "meta": {"model": "composer-2.5", "seconds": 16, "input_tokens": 17693, "output_tokens": 1674},
+}
+
+RECOGNIZE_NO_KL = {
+    "status": "manual",
+    "reason": "BI не отдал КЛ (HTTP 500)",
+    "rooms": [],
+    "total_area": None,
+    "total_rooms": None,
+    "checks": {
+        "rooms_sum": None,
+        "sheet_total": None,
+        "sheet_ok": None,
+        "bi_area": 73.37,
+        "bi_ok": None,
+    },
+    "doubts": [],
+    "meta": {"model": "composer-2.5", "seconds": None, "input_tokens": None, "output_tokens": None},
+}
