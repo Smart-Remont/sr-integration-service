@@ -104,4 +104,10 @@ class ComposerClient:
             logger.error(
                 "Composer helper exit {code}: {err}", code=process.returncode, err=stderr[-1000:]
             )
+            # The helper prints a JSON error itself; empty stdout means Node did not even start.
+            if not stdout.strip():
+                last_line = stderr.decode(errors="replace").strip().splitlines()[-1:] or ["—"]
+                raise ComposerError(
+                    f"помощник SDK упал (код {process.returncode}): {last_line[0][:200]}"
+                )
         return stdout

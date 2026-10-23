@@ -2,8 +2,11 @@
 becomes the result. BI and Composer are replaced by mocks; the status is always recomputed
 from the sums, never taken from the agent."""
 
+import asyncio
 import base64
 import json
+import threading
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock
@@ -15,6 +18,7 @@ from src.config import kl_recognition_auth_config
 from src.features.kl_recognition.client import KlSheetNotFoundError
 from src.features.kl_recognition.composer import ComposerAnswer, ComposerError
 from src.features.kl_recognition.deps import get_kl_recognition_service
+from src.features.kl_recognition.schemas import KlRecognizeRequest
 from src.features.kl_recognition.service import KlRecognitionService
 from src.main import app
 
@@ -177,3 +181,34 @@ async def test_manual_when_answer_has_no_json(client: AsyncClient, composer: Asy
     result = await recognize(client)
     assert result["status"] == "manual"
     assert result["reason"] == "ответ агента без JSON"
+
+
+async def test_plan_images_are_built_two_at_a_time(composer: AsyncMock) -> None:
+    # A burst of requests used to crop every page at once and run out of memory.
+    running = peak = 0
+    lock = threading.Lock()
+
+    def slow_build(_pdf: bytes) -> list[bytes]:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with lock:
+            running -= 1
+        return [b"jpeg"] * 5
+
+    sheet_client = AsyncMock()
+    sheet_client.download.return_value = b"%PDF-1.7"
+    service = KlRecognitionService(
+        sheet_client=sheet_client,
+        composer=composer,
+        build_images=slow_build,
+        model="composer-2.5",
+        prompt_template="{BI_AREA}",
+    )
+    request = KlRecognizeRequest(flat_guid=FLAT_GUID, bi_area=ROOMS_SUM)
+    results = await asyncio.gather(*(service.recognize(request) for _ in range(10)))
+
+    assert all(result.status == "auto" for result in results)
+    assert peak == 2
