@@ -6,7 +6,7 @@ that depend on several rooms and the numbering are here, the same as in
 `flat_image__create_flat_image_room`: the model swaps close areas when it numbers itself.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -60,12 +60,56 @@ CHAINS: dict[RoomType, list[tuple[int, str]]] = {
 STORAGE_AS = RoomType.WARDROBE
 # `flat_image__create_flat_image_room`: a toilet this large is a bathroom.
 BATHROOM_MIN_AREA = 3.5
+# A storeroom behind only a dashed line is part of the kitchen: operators add its area to it
+# (MERIDIAN 201: 11,19 + 3,16; 168; Arman Qala). Wardrobes and niches they keep as rooms of
+# their own (MERIDIAN 229, 292, Crystal, Samgar, Sapa, Biography), so those are not merged.
+MERGEABLE = {RoomType.STORAGE}
+MERGE_TARGETS = {RoomType.KITCHEN}
 
 
 @dataclass(frozen=True)
 class SystemRoom:
     room_id: int
     name: str
+
+
+@dataclass
+class ReadRoom:
+    name: str
+    area: float
+    financial_area: float
+    kind: RoomType
+    # The neighbour (name, area) the agent says this room is open to across a dashed line.
+    open_to: tuple[str, float] | None = None
+    merged_from: list[tuple[str, float]] = field(default_factory=list)
+
+
+def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoom]:
+    """Adds storerooms behind a dashed line to the kitchen they open into."""
+    original_areas = [room.area for room in rooms]
+    absorbed: set[int] = set()
+    for i, room in enumerate(rooms):
+        if room.kind not in MERGEABLE or room.open_to is None:
+            continue
+        name, area = room.open_to
+        candidates = [
+            j
+            for j, other in enumerate(rooms)
+            if j != i and j not in absorbed and abs(original_areas[j] - area) < 0.005
+        ]
+        if len(candidates) > 1:
+            candidates = [j for j in candidates if rooms[j].name == name] or candidates
+        if len(candidates) != 1 or rooms[candidates[0]].kind not in MERGE_TARGETS:
+            doubts.append(f"«{room.name}» {room.area} за пунктиром у «{name}» {area} не объединён")
+            continue
+        parent = rooms[candidates[0]]
+        if not parent.merged_from:
+            parent.merged_from.append((parent.name, parent.area))
+        parent.merged_from.append((room.name, room.area))
+        parent.area = round(parent.area + room.area, 2)
+        parent.financial_area = round(parent.financial_area + room.financial_area, 2)
+        absorbed.add(i)
+    return [room for i, room in enumerate(rooms) if i not in absorbed]
 
 
 # Latin letters that look like Cyrillic ones: models sometimes mix them into Russian words.
@@ -91,6 +135,14 @@ def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:
     for position, i in enumerate(halls):
         # The largest hall is the hallway when the sheet has none; the rest are corridors.
         resolved[i] = RoomType.HALLWAY if position == 0 and not has_hallway else RoomType.CORRIDOR
+
+    # room_tab has one hallway; a second «Прихожая» on the sheet operators enter as a corridor
+    # (Family Gardens 1, кв. 129: 6,94 — прихожая, 5,53 — коридор).
+    hallways = sorted(
+        (i for i, kind in enumerate(resolved) if kind is RoomType.HALLWAY), key=lambda i: -areas[i]
+    )
+    for i in hallways[1:]:
+        resolved[i] = RoomType.CORRIDOR
 
     toilets = [i for i, kind in enumerate(resolved) if kind is RoomType.TOILET]
     if toilets and RoomType.BATHROOM not in resolved:

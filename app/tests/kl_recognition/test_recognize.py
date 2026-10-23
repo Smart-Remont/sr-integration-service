@@ -126,6 +126,7 @@ async def test_auto_when_sum_matches_sheet_and_bi(client: AsyncClient, composer:
         "room_type": "Балкон",
         "room_id": 20,
         "system_name": "Балкон",
+        "merged_from": [],
     }
     assert result["checks"] == {
         "rooms_sum": ROOMS_SUM,
@@ -173,6 +174,38 @@ async def test_room_of_unknown_type_goes_to_manual(
     assert result["status"] == "manual"
     assert "тип помещения не определён: Сауна" in result["reason"]
     assert result["rooms"][2]["room_id"] is None
+
+
+async def test_free_layout_is_not_recognised(client: AsyncClient, composer: AsyncMock) -> None:
+    answer = {"freeLayout": True, "freeLayoutReason": "спальня за пунктиром", "rooms": []}
+    composer.read_plan.return_value = ComposerAnswer(
+        text=json.dumps(answer, ensure_ascii=False), seconds=9, input_tokens=17000, output_tokens=60
+    )
+    result = await recognize(client)
+    assert result["status"] == "free_layout"
+    assert result["reason"] == "свободная планировка: спальня за пунктиром"
+    assert result["rooms"] == []
+
+
+async def test_storage_behind_a_dashed_line_is_merged_without_changing_the_sum(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    pantry = {
+        "name": "Кладовая",
+        "type": "Кладовая",
+        "area": 3.16,
+        "financialArea": 3.16,
+        "openTo": {"name": "Кухня", "area": 11.19},
+    }
+    composer.read_plan.return_value = composer_answer(
+        rooms=[*ROOMS, pantry], checks={"sheetTotal": ROOMS_SUM + 3.16}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": ROOMS_SUM + 3.16})
+    assert result["status"] == "auto"
+    kitchen = result["rooms"][0]
+    assert (kitchen["area"], kitchen["system_name"]) == (14.35, "Кухня")
+    assert [part["name"] for part in kitchen["merged_from"]] == ["Кухня", "Кладовая"]
+    assert len(result["rooms"]) == 3
 
 
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:

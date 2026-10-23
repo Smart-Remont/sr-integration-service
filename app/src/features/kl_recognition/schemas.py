@@ -10,6 +10,7 @@ from src.schema import BaseSchema
 class RecognitionStatus(StrEnum):
     AUTO = "auto"
     MANUAL = "manual"
+    FREE_LAYOUT = "free_layout"
 
 
 class KlRecognizeRequest(BaseSchema):
@@ -32,6 +33,11 @@ class KlRecognizeRequest(BaseSchema):
         return self
 
 
+class KlRoomPart(BaseSchema):
+    name: str
+    area: float
+
+
 class KlRoom(BaseSchema):
     name: str = Field(description="Название, как напечатано на листе (`С/у`, `Гард.`, …).")
     area: float = Field(description="Площадь, м²; у лоджий и балконов — полная.")
@@ -46,6 +52,10 @@ class KlRoom(BaseSchema):
     )
     system_name: str | None = Field(
         description="Название комнаты системы: `Спальня №2`, `Коридор`, …; null — не определена."
+    )
+    merged_from: list[KlRoomPart] = Field(
+        default_factory=list,
+        description="Из чего сложена площадь: кухня и кладовая за пунктиром.",
     )
 
 
@@ -66,7 +76,7 @@ class KlRecognitionMeta(BaseSchema):
 
 class KlRecognitionResult(BaseSchema):
     status: RecognitionStatus = Field(
-        description="`auto` — сумма комнат сошлась с листом и с BI, поля можно заполнять; `manual` — проверить вручную."
+        description="`auto` — сумма комнат сошлась с листом и с BI, поля можно заполнять; `manual` — проверить вручную; `free_layout` — свободная планировка, не распознаётся."
     )
     reason: str = Field(description="Почему такой статус.")
     rooms: list[KlRoom]

@@ -15,27 +15,21 @@ RECOGNIZE_AUTO = {
     "rooms": [
         {
             "name": "Кухня",
-            "area": 11.19,
-            "financial_area": 11.19,
+            "area": 14.35,
+            "financial_area": 14.35,
             "room_type": "Кухня",
             "room_id": 2,
             "system_name": "Кухня",
-        },
-        {
-            "name": "Кладовая",
-            "area": 3.16,
-            "financial_area": 3.16,
-            "room_type": "Кладовая",
-            "room_id": 22,
-            "system_name": "Гардеробная",
+            "merged_from": [{"name": "Кухня", "area": 11.19}, {"name": "Кладовая", "area": 3.16}],
         },
         {
             "name": "Гардероб",
             "area": 2.18,
             "financial_area": 2.18,
             "room_type": "Гардеробная",
-            "room_id": 27,
-            "system_name": "Гардеробная №2",
+            "room_id": 22,
+            "system_name": "Гардеробная",
+            "merged_from": [],
         },
         {
             "name": "Гостиная",
@@ -44,6 +38,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Гостиная",
             "room_id": 1,
             "system_name": "Гостиная",
+            "merged_from": [],
         },
         {
             "name": "Лоджия",
@@ -52,6 +47,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Балкон",
             "room_id": 20,
             "system_name": "Балкон",
+            "merged_from": [],
         },
         {
             "name": "Спальня",
@@ -60,6 +56,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Спальня",
             "room_id": 10,
             "system_name": "Спальня №2",
+            "merged_from": [],
         },
         {
             "name": "Ванная",
@@ -68,6 +65,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Ванная",
             "room_id": 4,
             "system_name": "Ванная",
+            "merged_from": [],
         },
         {
             "name": "Холл",
@@ -76,6 +74,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Холл",
             "room_id": 6,
             "system_name": "Прихожая",
+            "merged_from": [],
         },
         {
             "name": "С/у",
@@ -84,6 +83,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Санузел",
             "room_id": 5,
             "system_name": "Санузел",
+            "merged_from": [],
         },
         {
             "name": "Мастер спальня",
@@ -92,6 +92,7 @@ RECOGNIZE_AUTO = {
             "room_type": "Спальня",
             "room_id": 3,
             "system_name": "Спальня",
+            "merged_from": [],
         },
     ],
     "total_area": 91.67,
@@ -105,6 +106,23 @@ RECOGNIZE_AUTO = {
     },
     "doubts": [],
     "meta": {"model": "composer-2.5", "seconds": 16, "input_tokens": 17693, "output_tokens": 1674},
+}
+
+RECOGNIZE_FREE_LAYOUT = {
+    "status": "free_layout",
+    "reason": "свободная планировка: мастер-спальня отделена от гостиной пунктиром",
+    "rooms": [],
+    "total_area": None,
+    "total_rooms": None,
+    "checks": {
+        "rooms_sum": None,
+        "sheet_total": None,
+        "sheet_ok": None,
+        "bi_area": 101.21,
+        "bi_ok": None,
+    },
+    "doubts": [],
+    "meta": {"model": "composer-2.5", "seconds": 9, "input_tokens": 16890, "output_tokens": 210},
 }
 
 RECOGNIZE_NO_KL = {

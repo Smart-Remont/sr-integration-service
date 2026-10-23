@@ -5,8 +5,15 @@ import json
 import re
 from typing import Any
 
-from .room_mapping import RoomType, room_type, system_rooms
-from .schemas import KlChecks, KlRecognitionMeta, KlRecognitionResult, KlRoom, RecognitionStatus
+from .room_mapping import ReadRoom, RoomType, merge_open_storage, room_type, system_rooms
+from .schemas import (
+    KlChecks,
+    KlRecognitionMeta,
+    KlRecognitionResult,
+    KlRoom,
+    KlRoomPart,
+    RecognitionStatus,
+)
 
 # Sheet areas are rounded to hundredths; correctly read sheets differ from the total by 0–0.03.
 SUM_TOLERANCE = 0.03
@@ -46,6 +53,11 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _open_to(raw: Any) -> tuple[str, float] | None:
+    area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
+    return None if area is None else (str(raw.get("name") or "").strip(), area)
+
+
 def _rooms(raw_rooms: Any, doubts: list[str]) -> list[KlRoom]:
     read = []
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
@@ -58,19 +70,29 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> list[KlRoom]:
         if kind is None:
             doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
             kind = RoomType.OTHER
-        read.append((str(raw["name"]).strip(), area, financial or area, kind))
+        read.append(
+            ReadRoom(
+                name=str(raw["name"]).strip(),
+                area=area,
+                financial_area=financial or area,
+                kind=kind,
+                open_to=_open_to(raw.get("openTo")),
+            )
+        )
 
-    targets = system_rooms([kind for *_, kind in read], [area for _, area, *_ in read])
+    read = merge_open_storage(read, doubts)
+    targets = system_rooms([room.kind for room in read], [room.area for room in read])
     return [
         KlRoom(
-            name=name,
-            area=area,
-            financial_area=financial,
-            room_type=kind,
+            name=room.name,
+            area=room.area,
+            financial_area=room.financial_area,
+            room_type=room.kind,
             room_id=target.room_id if target else None,
             system_name=target.name if target else None,
+            merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
         )
-        for (name, area, financial, kind), target in zip(read, targets, strict=True)
+        for room, target in zip(read, targets, strict=True)
     ]
 
 
@@ -88,9 +110,22 @@ def build_result(
     answer: dict[str, Any], bi_area: float | None, meta: KlRecognitionMeta
 ) -> KlRecognitionResult:
     doubts = [str(item) for item in answer.get("doubts") or []]
-    rooms = _rooms(answer.get("rooms"), doubts)
     checks_in = answer.get("checks") if isinstance(answer.get("checks"), dict) else {}
     sheet_total = _as_float(checks_in.get("sheetTotal", answer.get("totalArea")))
+    if answer.get("freeLayout") is True:
+        # Free layouts are not recognised at all: the agent stops before reading the rooms.
+        return KlRecognitionResult(
+            status=RecognitionStatus.FREE_LAYOUT,
+            reason=f"свободная планировка: {answer.get('freeLayoutReason') or 'спальня за пунктиром'}",
+            rooms=[],
+            total_area=sheet_total,
+            total_rooms=None,
+            checks=KlChecks(sheet_total=sheet_total, bi_area=bi_area),
+            doubts=doubts,
+            meta=meta,
+        )
+
+    rooms = _rooms(answer.get("rooms"), doubts)
 
     rooms_sum = round(sum(room.financial_area for room in rooms), 2)
     sheet_ok = None if sheet_total is None else abs(rooms_sum - sheet_total) <= SUM_TOLERANCE

@@ -1,7 +1,13 @@
 """System rooms for the read rooms: the rules of `flat_image__create_flat_image_room` and
 numbering by area, which the model got wrong when it numbered rooms itself."""
 
-from src.features.kl_recognition.room_mapping import RoomType, room_type, system_rooms
+from src.features.kl_recognition.room_mapping import (
+    ReadRoom,
+    RoomType,
+    merge_open_storage,
+    room_type,
+    system_rooms,
+)
 
 T = RoomType
 
@@ -39,6 +45,14 @@ def test_hall_is_hallway_without_one_and_corridor_with_one() -> None:
     assert names([T.HALL, T.HALL], [3.0, 8.0]) == ["Коридор", "Прихожая"]
 
 
+def test_second_hallway_is_a_corridor() -> None:
+    assert names([T.HALLWAY, T.HALL, T.HALLWAY], [6.94, 16.43, 5.53]) == [
+        "Прихожая",
+        "Коридор",
+        "Коридор №2",
+    ]
+
+
 def test_largest_toilet_is_bathroom_when_there_is_none() -> None:
     assert names([T.TOILET, T.TOILET], [2.1, 3.2]) == ["Санузел", "Ванная"]
 
@@ -61,3 +75,49 @@ def test_type_is_read_leniently_but_only_from_the_list() -> None:
     assert room_type("Сауна") is None
     assert room_type(None) is None
     assert names([T.OTHER], [10.0]) == [None]
+
+
+def storage(name: str, area: float, open_to: tuple[str, float] | None) -> ReadRoom:
+    return ReadRoom(name, area, area, T.STORAGE, open_to)
+
+
+def test_storage_behind_a_dashed_line_is_added_to_the_kitchen() -> None:
+    kitchen = ReadRoom("Кухня", 11.19, 11.19, T.KITCHEN)
+    doubts: list[str] = []
+    rooms = merge_open_storage([kitchen, storage("Кладовая", 3.16, ("Кухня", 11.19))], doubts)
+    assert [(r.name, r.area) for r in rooms] == [("Кухня", 14.35)]
+    assert rooms[0].merged_from == [("Кухня", 11.19), ("Кладовая", 3.16)]
+    assert doubts == []
+
+
+def test_two_storerooms_into_one_kitchen_match_its_printed_area() -> None:
+    kitchen = ReadRoom("Кухня", 9.0, 9.0, T.KITCHEN)
+    rooms = merge_open_storage(
+        [kitchen, storage("Клад.", 2.0, ("Кухня", 9.0)), storage("Кладовая", 1.0, ("Кухня", 9.0))],
+        [],
+    )
+    assert [(r.name, r.area) for r in rooms] == [("Кухня", 12.0)]
+
+
+def test_wardrobe_behind_a_dashed_line_stays_a_room_of_its_own() -> None:
+    # Operators keep «Гардероб» separate even when only a dashed line divides it.
+    bedroom = ReadRoom("Спальня", 12.06, 12.06, T.BEDROOM)
+    wardrobe = ReadRoom("Ниша для шк.", 5.15, 5.15, T.WARDROBE, ("Спальня", 12.06))
+    assert len(merge_open_storage([bedroom, wardrobe], [])) == 2
+
+
+def test_storage_behind_a_wall_or_open_to_a_corridor_stays_separate() -> None:
+    corridor = ReadRoom("Коридор", 7.0, 7.0, T.CORRIDOR)
+    doubts: list[str] = []
+    rooms = merge_open_storage(
+        [corridor, storage("Клад.", 2.0, None), storage("Кладовка", 3.0, ("Коридор", 7.0))], doubts
+    )
+    assert len(rooms) == 3
+    assert doubts == ["«Кладовка» 3.0 за пунктиром у «Коридор» 7.0 не объединён"]
+
+
+def test_storage_open_to_an_unknown_room_stays_separate() -> None:
+    doubts: list[str] = []
+    rooms = merge_open_storage([storage("Клад.", 2.0, ("Кухня", 9.99))], doubts)
+    assert len(rooms) == 1
+    assert len(doubts) == 1
