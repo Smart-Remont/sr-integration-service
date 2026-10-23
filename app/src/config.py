@@ -148,6 +148,30 @@ class FileStoreConfig:
         return f"{self.public_base_url}{logical_path}"
 
 
+class KlRecognitionAuthConfig:
+    """Basic auth for /api/v1/kl_recognition/*. No fallback: empty → 503."""
+
+    username: str = os.getenv("KL_RECOGNITION_API_USER", "")
+    password: str = os.getenv("KL_RECOGNITION_API_PASSWORD", "")
+
+
+class KlRecognitionConfig:
+    """Apartment sheet (KL) recognition: BI loadSheet + Composer through the Cursor SDK."""
+
+    # Public BI endpoint rendering the KL PDF by flat GUID; no BI credentials needed.
+    load_sheet_url: str = os.getenv(
+        "BI_LOAD_SHEET_URL",
+        "https://apigw.bi.group/crm-document/api/placement/public/loadSheet",
+    )
+    # Cursor account key the agent runs under (Cursor dashboard → Integrations → API Keys).
+    cursor_api_key: str = os.getenv("CURSOR_API_KEY", "")
+    cursor_model: str = os.getenv("CURSOR_MODEL", "composer-2.5")
+    node_bin: str = os.getenv("KL_RECOGNITION_NODE_BIN", "node")
+    # One recognition takes 15–30 s; the limit guards against a hung agent run.
+    agent_timeout_seconds: int = int(os.getenv("KL_RECOGNITION_AGENT_TIMEOUT", "300"))
+    max_parallel: int = int(os.getenv("KL_RECOGNITION_MAX_PARALLEL", "4"))
+
+
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
 installment_auth_config = InstallmentAuthConfig()
@@ -159,3 +183,5 @@ mynca_config = MyncaConfig()
 app_config = AppConfig()
 minio_config = MinioConfig()
 file_store_config = FileStoreConfig()
+kl_recognition_auth_config = KlRecognitionAuthConfig()
+kl_recognition_config = KlRecognitionConfig()

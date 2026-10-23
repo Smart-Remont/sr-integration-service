@@ -44,6 +44,14 @@ TAGS = [
         ),
     },
     {
+        "name": "KL Recognition (BI Group)",
+        "description": (
+            "Распознавание квартирных листов BI Group: по GUID квартиры — помещения с площадями "
+            "и статус `auto`/`manual` по сверке суммы с листом и площадью BI. Читает Composer "
+            "через Cursor SDK; без БД."
+        ),
+    },
+    {
         "name": "Health",
         "description": "`/health` — процесс жив (liveness), `/health/ready` — есть связь с БД.",
     },
