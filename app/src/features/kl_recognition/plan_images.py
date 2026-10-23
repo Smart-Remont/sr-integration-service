@@ -83,7 +83,9 @@ def find_plan_box(page: np.ndarray) -> tuple[int, int, int, int] | None:
     long_side = max(height, width)
     gray = cv2.cvtColor(page, cv2.COLOR_BGR2GRAY)
     dark, by_angle = _wall_lines(gray, long_side)
-    lines = np.bitwise_or.reduce(np.stack(by_angle), axis=0)
+    lines = by_angle[0].copy()
+    for band in by_angle[1:]:
+        cv2.bitwise_or(lines, band, dst=lines)
 
     gap = int(long_side * 0.03)  # glues the walls of one plan across door openings
     merged = cv2.morphologyEx(

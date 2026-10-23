@@ -11,6 +11,16 @@ from .result import build_result, first_json_object, manual_result
 from .schemas import KlRecognitionMeta, KlRecognitionResult, KlRecognizeRequest
 
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
+IMAGE_BUILDS_AT_ONCE = 2
+
+_image_semaphore: asyncio.Semaphore | None = None
+
+
+def _image_slots() -> asyncio.Semaphore:
+    global _image_semaphore
+    if _image_semaphore is None:
+        _image_semaphore = asyncio.Semaphore(IMAGE_BUILDS_AT_ONCE)
+    return _image_semaphore
 
 
 class KlRecognitionService:
@@ -42,8 +52,10 @@ class KlRecognitionService:
                 flat_guid=str(request.flat_guid) if request.flat_guid else None,
                 pdf_url=str(request.pdf_url) if request.pdf_url else None,
             )
-            # cv2 work is CPU-bound: keep the event loop free for other requests
-            images = await asyncio.to_thread(self._build_images, pdf)
+            # Cropping is CPU-bound and takes hundreds of MB per page (18 line maps): run it off
+            # the event loop and only a couple at a time, or a burst of requests runs out of memory.
+            async with _image_slots():
+                images = await asyncio.to_thread(self._build_images, pdf)
         except (KlSheetNotFoundError, KlSheetDownloadError, PlanPageMissingError) as exc:
             logger.info("KL {source}: {reason}", source=source, reason=exc)
             return manual_result(str(exc), request.bi_area, meta)
