@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from .room_mapping import RoomType, room_type, system_rooms
 from .schemas import KlChecks, KlRecognitionMeta, KlRecognitionResult, KlRoom, RecognitionStatus
 
 # Sheet areas are rounded to hundredths; correctly read sheets differ from the total by 0–0.03.
@@ -46,17 +47,41 @@ def _as_float(value: Any) -> float | None:
 
 
 def _rooms(raw_rooms: Any, doubts: list[str]) -> list[KlRoom]:
-    rooms = []
+    read = []
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
         area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
         if area is None or not str(raw.get("name") or "").strip():
             doubts.append(f"запись комнаты без названия или площади: {raw}")
             continue
         financial = _as_float(raw.get("financialArea", raw.get("financial_area")))
-        rooms.append(
-            KlRoom(name=str(raw["name"]).strip(), area=area, financial_area=financial or area)
+        kind = room_type(raw.get("type"))
+        if kind is None:
+            doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
+            kind = RoomType.OTHER
+        read.append((str(raw["name"]).strip(), area, financial or area, kind))
+
+    targets = system_rooms([kind for *_, kind in read], [area for _, area, *_ in read])
+    return [
+        KlRoom(
+            name=name,
+            area=area,
+            financial_area=financial,
+            room_type=kind,
+            room_id=target.room_id if target else None,
+            system_name=target.name if target else None,
         )
-    return rooms
+        for (name, area, financial, kind), target in zip(read, targets, strict=True)
+    ]
+
+
+def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
+    unknown = [room.name for room in rooms if room.room_type == RoomType.OTHER]
+    if unknown:
+        return "тип помещения не определён: " + ", ".join(unknown)
+    overflow = [room.name for room in rooms if room.room_id is None]
+    if overflow:
+        return "в справочнике комнат нет места для: " + ", ".join(overflow)
+    return None
 
 
 def build_result(
@@ -71,6 +96,7 @@ def build_result(
     sheet_ok = None if sheet_total is None else abs(rooms_sum - sheet_total) <= SUM_TOLERANCE
     bi_ok = None if bi_area is None else abs(rooms_sum - bi_area) <= SUM_TOLERANCE
     unnamed = any(room.name.lower().startswith("не определ") for room in rooms)
+    unmapped = _unmapped_reason(rooms)
 
     if not rooms:
         status, reason = (
@@ -79,7 +105,7 @@ def build_result(
         )
     elif sheet_ok is None and bi_ok is None:
         status, reason = RecognitionStatus.MANUAL, f"сумма комнат {rooms_sum}: не с чем сверить"
-    elif sheet_ok is not False and bi_ok is not False and not unnamed:
+    elif sheet_ok is not False and bi_ok is not False and not unnamed and not unmapped:
         status = RecognitionStatus.AUTO
         reason = f"сумма комнат {rooms_sum} = лист {sheet_total} = BI {bi_area}"
     else:
@@ -87,6 +113,8 @@ def build_result(
         reason = f"сумма комнат {rooms_sum}, лист {sheet_total}, BI {bi_area}"
         if unnamed:
             reason += "; есть помещение без названия"
+        if unmapped:
+            reason += f"; {unmapped}"
 
     total_rooms = answer.get("totalRooms")
     return KlRecognitionResult(

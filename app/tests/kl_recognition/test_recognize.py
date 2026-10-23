@@ -27,9 +27,9 @@ FLAT_GUID = "141754c1-b8cb-4f1d-8e4c-bc02a9d6c37d"
 PASSWORD = "kl-secret"
 
 ROOMS = [
-    {"name": "Кухня", "area": 11.19, "financialArea": 11.19},
-    {"name": "Лоджия", "area": 3.08, "financialArea": 1.54},
-    {"name": "Гостиная", "area": 20.85, "financialArea": 20.85},
+    {"name": "Кухня", "type": "Кухня", "area": 11.19, "financialArea": 11.19},
+    {"name": "Лоджия", "type": "Балкон", "area": 3.08, "financialArea": 1.54},
+    {"name": "Гостиная", "type": "Гостиная", "area": 20.85, "financialArea": 20.85},
 ]
 ROOMS_SUM = 33.58
 
@@ -119,7 +119,14 @@ async def test_auto_when_sum_matches_sheet_and_bi(client: AsyncClient, composer:
     result = await recognize(client)
 
     assert result["status"] == "auto"
-    assert result["rooms"][1] == {"name": "Лоджия", "area": 3.08, "financial_area": 1.54}
+    assert result["rooms"][1] == {
+        "name": "Лоджия",
+        "area": 3.08,
+        "financial_area": 1.54,
+        "room_type": "Балкон",
+        "room_id": 20,
+        "system_name": "Балкон",
+    }
     assert result["checks"] == {
         "rooms_sum": ROOMS_SUM,
         "sheet_total": ROOMS_SUM,
@@ -154,6 +161,27 @@ async def test_unnamed_room_goes_to_manual(client: AsyncClient, composer: AsyncM
     result = await recognize(client)
     assert result["status"] == "manual"
     assert "без названия" in result["reason"]
+
+
+async def test_room_of_unknown_type_goes_to_manual(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # The sums match, but «Сауна» has no room in the system.
+    rooms = [*ROOMS[:2], {"name": "Сауна", "type": "Другое", "area": 20.85, "financialArea": 20.85}]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+    result = await recognize(client)
+    assert result["status"] == "manual"
+    assert "тип помещения не определён: Сауна" in result["reason"]
+    assert result["rooms"][2]["room_id"] is None
+
+
+async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
+    rooms = [*ROOMS[:2], {"name": "Гостиная", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+    result = await recognize(client)
+    assert result["status"] == "manual"
+    assert result["rooms"][2]["room_type"] == "Другое"
+    assert "тип «Зал» у «Гостиная» не из списка" in result["doubts"]
 
 
 async def test_manual_when_bi_has_no_kl(

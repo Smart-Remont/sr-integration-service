@@ -38,6 +38,15 @@ class KlRoom(BaseSchema):
     financial_area: float = Field(
         description="Площадь в общей сумме: у лоджий, балконов, террас — с коэффициентом, у остальных = area."
     )
+    room_type: str = Field(
+        description="Тип помещения по ответу агента: `Спальня`, `Холл`, `Кладовая`, … или `Другое`."
+    )
+    room_id: int | None = Field(
+        description="Комната системы (`room_tab.room_id`) с номером по площади; null — не определена."
+    )
+    system_name: str | None = Field(
+        description="Название комнаты системы: `Спальня №2`, `Коридор`, …; null — не определена."
+    )
 
 
 class KlChecks(BaseSchema):
