@@ -8,8 +8,8 @@ from src.schema import BaseSchema
 
 
 class RecognitionStatus(StrEnum):
-    AUTO = "auto"
-    MANUAL = "manual"
+    RECOGNIZED = "recognized"
+    NOT_RECOGNIZED = "not_recognized"
     FREE_LAYOUT = "free_layout"
 
 
@@ -76,7 +76,12 @@ class KlRecognitionMeta(BaseSchema):
 
 class KlRecognitionResult(BaseSchema):
     status: RecognitionStatus = Field(
-        description="`auto` — сумма комнат сошлась с листом и с BI, поля можно заполнять; `manual` — проверить вручную; `free_layout` — свободная планировка, не распознаётся."
+        description=(
+            "`recognized` — сумма комнат сошлась с листом и с BI, все комнаты определены, "
+            "заполнять автоматически; `not_recognized` — не распознано, комнат нет, причина в "
+            "`reason`, планировку заводят вручную; `free_layout` — свободная планировка, не "
+            "распознаётся."
+        )
     )
     reason: str = Field(description="Почему такой статус.")
     rooms: list[KlRoom]

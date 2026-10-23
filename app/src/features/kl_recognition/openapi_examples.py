@@ -9,8 +9,8 @@ RECOGNIZE_REQUEST = {
     },
 }
 
-RECOGNIZE_AUTO = {
-    "status": "auto",
+RECOGNIZE_RECOGNIZED = {
+    "status": "recognized",
     "reason": "сумма комнат 91.67 = лист 91.67 = BI 91.67",
     "rooms": [
         {
@@ -125,8 +125,25 @@ RECOGNIZE_FREE_LAYOUT = {
     "meta": {"model": "composer-2.5", "seconds": 9, "input_tokens": 16890, "output_tokens": 210},
 }
 
+RECOGNIZE_SUM_MISMATCH = {
+    "status": "not_recognized",
+    "reason": "сумма комнат 114.76, лист 114.92, BI 114.92",
+    "rooms": [],
+    "total_area": 114.92,
+    "total_rooms": 4,
+    "checks": {
+        "rooms_sum": 114.76,
+        "sheet_total": 114.92,
+        "sheet_ok": False,
+        "bi_area": 114.92,
+        "bi_ok": False,
+    },
+    "doubts": ["Сумма 114.76 не сходится с 114.92 на листе (Δ0.16)"],
+    "meta": {"model": "composer-2.5", "seconds": 29, "input_tokens": 21000, "output_tokens": 2300},
+}
+
 RECOGNIZE_NO_KL = {
-    "status": "manual",
+    "status": "not_recognized",
     "reason": "BI не отдал КЛ (HTTP 500)",
     "rooms": [],
     "total_area": None,

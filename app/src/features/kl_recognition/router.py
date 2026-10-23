@@ -7,10 +7,11 @@ from src.routers.config import api_prefix_config
 from .auth import KlRecognitionBasicAuthDep
 from .deps import KlRecognitionServiceDep
 from .openapi_examples import (
-    RECOGNIZE_AUTO,
     RECOGNIZE_FREE_LAYOUT,
     RECOGNIZE_NO_KL,
+    RECOGNIZE_RECOGNIZED,
     RECOGNIZE_REQUEST,
+    RECOGNIZE_SUM_MISMATCH,
 )
 from .schemas import KlRecognitionResult, KlRecognizeRequest
 
@@ -27,10 +28,11 @@ router = APIRouter(prefix=api_prefix_config.v1.kl_recognition, tags=["KL Recogni
         "`free_layout`, комнаты не читаются. Иначе выписывает помещения с площадями как "
         "напечатаны и тип каждого. Здесь кладовая за пунктиром прибавляется к "
         "кухне (`merged_from`), помещения получают комнату системы (`room_id`, номер по "
-        "площади по цепочке `room_tab`), считаются сумма и статус: `auto` — сумма "
+        "площади по цепочке `room_tab`), считаются сумма и статус: `recognized` — сумма "
         "`financial_area` сошлась с общей площадью листа и с `bi_area` (±0,03) и все комнаты "
-        "определены; иначе `manual` с причиной в `reason`. Нет КЛ, нет плана, агент не "
-        "ответил — тоже `manual` (HTTP 200).\n\n"
+        "определены, заполнять автоматически; иначе `not_recognized` без комнат, причина в "
+        "`reason` — планировку заводят вручную. Нет КЛ, нет плана, агент не ответил — тоже "
+        "`not_recognized` (HTTP 200).\n\n"
         "Ответ за 15–30 с; без БД. Вызывает фоновая обработка планировок."
     ),
     responses={
@@ -39,7 +41,11 @@ router = APIRouter(prefix=api_prefix_config.v1.kl_recognition, tags=["KL Recogni
             "content": {
                 "application/json": {
                     "examples": {
-                        "auto": {"summary": "Сумма сошлась", "value": RECOGNIZE_AUTO},
+                        "recognized": {"summary": "Распознано", "value": RECOGNIZE_RECOGNIZED},
+                        "sum_mismatch": {
+                            "summary": "Не распознано: сумма не сошлась",
+                            "value": RECOGNIZE_SUM_MISMATCH,
+                        },
                         "free_layout": {
                             "summary": "Свободная планировка — не распознаётся",
                             "value": RECOGNIZE_FREE_LAYOUT,

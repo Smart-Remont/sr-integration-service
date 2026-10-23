@@ -31,11 +31,11 @@ def first_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
-def manual_result(
+def not_recognized_result(
     reason: str, bi_area: float | None, meta: KlRecognitionMeta
 ) -> KlRecognitionResult:
     return KlRecognitionResult(
-        status=RecognitionStatus.MANUAL,
+        status=RecognitionStatus.NOT_RECOGNIZED,
         reason=reason,
         rooms=[],
         total_area=None,
@@ -135,16 +135,17 @@ def build_result(
 
     if not rooms:
         status, reason = (
-            RecognitionStatus.MANUAL,
+            RecognitionStatus.NOT_RECOGNIZED,
             str(answer.get("reason") or "помещения не найдены"),
         )
     elif sheet_ok is None and bi_ok is None:
-        status, reason = RecognitionStatus.MANUAL, f"сумма комнат {rooms_sum}: не с чем сверить"
+        status = RecognitionStatus.NOT_RECOGNIZED
+        reason = f"сумма комнат {rooms_sum}: не с чем сверить"
     elif sheet_ok is not False and bi_ok is not False and not unnamed and not unmapped:
-        status = RecognitionStatus.AUTO
+        status = RecognitionStatus.RECOGNIZED
         reason = f"сумма комнат {rooms_sum} = лист {sheet_total} = BI {bi_area}"
     else:
-        status = RecognitionStatus.MANUAL
+        status = RecognitionStatus.NOT_RECOGNIZED
         reason = f"сумма комнат {rooms_sum}, лист {sheet_total}, BI {bi_area}"
         if unnamed:
             reason += "; есть помещение без названия"
@@ -155,7 +156,9 @@ def build_result(
     return KlRecognitionResult(
         status=status,
         reason=reason,
-        rooms=rooms,
+        # Unrecognised sheets carry no rooms: the planirovka is entered by hand, and half-read
+        # rooms must not be mistaken for a result. Sums and doubts still explain what failed.
+        rooms=rooms if status is RecognitionStatus.RECOGNIZED else [],
         total_area=sheet_total if sheet_total is not None else rooms_sum,
         total_rooms=total_rooms if isinstance(total_rooms, int) else None,
         checks=KlChecks(

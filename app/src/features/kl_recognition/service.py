@@ -7,7 +7,7 @@ from loguru import logger
 from .client import BiLoadSheetClient, KlSheetDownloadError, KlSheetNotFoundError
 from .composer import ComposerClient, ComposerError
 from .plan_images import PlanPageMissingError
-from .result import build_result, first_json_object, manual_result
+from .result import build_result, first_json_object, not_recognized_result
 from .schemas import KlRecognitionMeta, KlRecognitionResult, KlRecognizeRequest
 
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
@@ -27,7 +27,7 @@ class KlRecognitionService:
     """KL by flat GUID → plan images → Composer → rooms and areas with a checked status.
 
     Every failure that is about the sheet (no KL, no plan, agent gave no answer) becomes a
-    `manual` result: the caller always gets an answer to show the operator.
+    `not_recognized` result: the caller always gets an answer with the reason.
     """
 
     def __init__(
@@ -58,7 +58,7 @@ class KlRecognitionService:
                 images = await asyncio.to_thread(self._build_images, pdf)
         except (KlSheetNotFoundError, KlSheetDownloadError, PlanPageMissingError) as exc:
             logger.info("KL {source}: {reason}", source=source, reason=exc)
-            return manual_result(str(exc), request.bi_area, meta)
+            return not_recognized_result(str(exc), request.bi_area, meta)
 
         bi_text = f"{request.bi_area:.2f}" if request.bi_area is not None else ""
         try:
@@ -67,7 +67,7 @@ class KlRecognitionService:
             )
         except ComposerError as exc:
             logger.warning("KL {source}: Composer failed: {reason}", source=source, reason=exc)
-            return manual_result(str(exc), request.bi_area, meta)
+            return not_recognized_result(str(exc), request.bi_area, meta)
 
         meta = KlRecognitionMeta(
             model=self._model,
@@ -80,7 +80,7 @@ class KlRecognitionService:
             logger.warning(
                 "KL {source}: answer without JSON: {text}", source=source, text=answer.text[:500]
             )
-            return manual_result("ответ агента без JSON", request.bi_area, meta)
+            return not_recognized_result("ответ агента без JSON", request.bi_area, meta)
 
         result = build_result(data, request.bi_area, meta)
         logger.info(
