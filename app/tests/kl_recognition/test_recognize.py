@@ -178,7 +178,7 @@ async def test_room_of_unknown_type_is_not_recognized(
     composer.read_plan.return_value = composer_answer(rooms=rooms)
     result = await recognize(client)
     assert result["status"] == "not_recognized"
-    assert "тип помещения не определён: Сауна" in result["reason"]
+    assert "не определён тип или полная площадь помещения: Сауна" in result["reason"]
     assert result["rooms"] == []
 
 
@@ -341,6 +341,31 @@ async def test_terrace_counts_in_the_sum_but_is_not_a_room(
     assert [r["name"] for r in result["rooms"]] == ["Кухня", "Лоджия", "Гостиная"]
     assert next(r for r in result["rooms"] if r["name"] == "Лоджия")["system_name"] == "Балкон"
     assert result["terraces"] == [{"name": "Терраса", "area": 5.19}]
+
+
+async def test_balcony_with_one_printed_area_gets_the_full_area(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # Sanat: only the reduced area 0,99 is printed; operators enter 0,99 / 0,3 = 3,30.
+    balcony = {"name": "Балкон", "type": "Балкон", "area": 0.99, "financialArea": 0.99}
+    total = round(ROOMS[0]["area"] + ROOMS[2]["area"] + 0.99, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=[ROOMS[0], ROOMS[2], balcony], checks={"sheetTotal": total}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+    assert result["status"] == "recognized"
+    room = next(r for r in result["rooms"] if r["name"] == "Балкон")
+    assert (room["area"], room["financial_area"]) == (3.3, 0.99)
+
+
+async def test_loggia_with_one_printed_area_is_not_recognized(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    loggia = {"name": "Лоджия", "type": "Балкон", "area": 1.54, "financialArea": 1.54}
+    composer.read_plan.return_value = composer_answer(rooms=[ROOMS[0], loggia, ROOMS[2]])
+    result = await recognize(client)
+    assert result["status"] == "not_recognized"
+    assert "Лоджия" in result["reason"]
 
 
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
