@@ -72,6 +72,15 @@ MERGE_TARGETS: dict[RoomType, set[RoomType]] = {
 }
 
 
+# A terrace is not a room of the flat in the system: planirovki almost never hold one (27 of
+# 52 thousand since 2025), its area is kept on the flat (`flat_tab.terrace_area`).
+TERRACE_WORD = "террас"
+
+
+def is_terrace(name: str) -> bool:
+    return TERRACE_WORD in name.casefold()
+
+
 @dataclass(frozen=True)
 class SystemRoom:
     room_id: int

@@ -325,6 +325,24 @@ async def test_whole_page_failure_keeps_both_reasons(
     assert composer.read_plan.await_count == 2
 
 
+async def test_terrace_counts_in_the_sum_but_is_not_a_room(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # Darmen 2: a terrace 5,19 (1,56) and a loggia 2,84 (1,42) — operators enter only the loggia.
+    terrace = {"name": "Терраса", "type": "Балкон", "area": 5.19, "financialArea": 1.56}
+    total = round(ROOMS_SUM + 1.56, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=[*ROOMS, terrace], checks={"sheetTotal": total}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+
+    assert result["status"] == "recognized"
+    assert result["checks"]["rooms_sum"] == total
+    assert [r["name"] for r in result["rooms"]] == ["Кухня", "Лоджия", "Гостиная"]
+    assert next(r for r in result["rooms"] if r["name"] == "Лоджия")["system_name"] == "Балкон"
+    assert result["terraces"] == [{"name": "Терраса", "area": 5.19}]
+
+
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
     rooms = [*ROOMS[:2], {"name": "Гостиная", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
     composer.read_plan.return_value = composer_answer(rooms=rooms)
