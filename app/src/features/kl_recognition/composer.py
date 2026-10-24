@@ -12,6 +12,8 @@ from loguru import logger
 from src.config import KlRecognitionConfig
 
 HELPER = Path(__file__).parent / "composer_sdk" / "recognize.mjs"
+# Pauses before retrying a call refused by Cursor's rate limit.
+RATE_LIMIT_WAITS = (15, 30, 60)
 
 
 class ComposerError(Exception):
@@ -52,6 +54,19 @@ class ComposerClient:
                 "images": [base64.b64encode(image).decode() for image in images],
             }
         ).encode()
+        for wait in (*RATE_LIMIT_WAITS, None):
+            try:
+                return await self._read_once(task)
+            except ComposerError as exc:
+                # A burst of sheets can still hit Cursor's per-minute limits: wait, outside the
+                # parallel slot, and try again instead of failing the sheet.
+                if wait is None or "rate limit" not in str(exc).lower():
+                    raise
+                logger.warning("Composer rate limit, retry in {wait} s", wait=wait)
+                await asyncio.sleep(wait)
+        raise AssertionError("unreachable")
+
+    async def _read_once(self, task: bytes) -> ComposerAnswer:
         async with _parallel_slots(self._config.max_parallel):
             started = time.monotonic()
             stdout = await self._run_helper(task)
@@ -78,6 +93,11 @@ class ComposerClient:
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": home,
                 "CURSOR_API_KEY": self._config.cursor_api_key,
+                # The SDK lists the account's models on every new agent to validate the model id,
+                # and that call is limited to 30 a minute: hand it the model instead.
+                "CURSOR_SDK_LOCAL_MODEL_CATALOG_JSON": json.dumps(
+                    [{"id": self._config.cursor_model}]
+                ),
             }
             try:
                 process = await asyncio.create_subprocess_exec(
