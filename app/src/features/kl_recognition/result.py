@@ -5,7 +5,15 @@ import json
 import re
 from typing import Any
 
-from .schemas import KlChecks, KlRecognitionMeta, KlRecognitionResult, KlRoom, RecognitionStatus
+from .room_mapping import ReadRoom, RoomType, merge_open_storage, room_type, system_rooms
+from .schemas import (
+    KlChecks,
+    KlRecognitionMeta,
+    KlRecognitionResult,
+    KlRoom,
+    KlRoomPart,
+    RecognitionStatus,
+)
 
 # Sheet areas are rounded to hundredths; correctly read sheets differ from the total by 0–0.03.
 SUM_TOLERANCE = 0.03
@@ -23,11 +31,11 @@ def first_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
-def manual_result(
+def not_recognized_result(
     reason: str, bi_area: float | None, meta: KlRecognitionMeta
 ) -> KlRecognitionResult:
     return KlRecognitionResult(
-        status=RecognitionStatus.MANUAL,
+        status=RecognitionStatus.NOT_RECOGNIZED,
         reason=reason,
         rooms=[],
         total_area=None,
@@ -45,54 +53,112 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _open_to(raw: Any) -> tuple[str, float] | None:
+    area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
+    return None if area is None else (str(raw.get("name") or "").strip(), area)
+
+
 def _rooms(raw_rooms: Any, doubts: list[str]) -> list[KlRoom]:
-    rooms = []
+    read = []
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
         area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
         if area is None or not str(raw.get("name") or "").strip():
             doubts.append(f"запись комнаты без названия или площади: {raw}")
             continue
         financial = _as_float(raw.get("financialArea", raw.get("financial_area")))
-        rooms.append(
-            KlRoom(name=str(raw["name"]).strip(), area=area, financial_area=financial or area)
+        kind = room_type(raw.get("type"))
+        if kind is None:
+            doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
+            kind = RoomType.OTHER
+        read.append(
+            ReadRoom(
+                name=str(raw["name"]).strip(),
+                area=area,
+                financial_area=financial or area,
+                kind=kind,
+                open_to=_open_to(raw.get("openTo")),
+            )
         )
-    return rooms
+
+    read = merge_open_storage(read, doubts)
+    targets = system_rooms([room.kind for room in read], [room.area for room in read])
+    return [
+        KlRoom(
+            name=room.name,
+            area=room.area,
+            financial_area=room.financial_area,
+            room_type=room.kind,
+            room_id=target.room_id if target else None,
+            system_name=target.name if target else None,
+            merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
+        )
+        for room, target in zip(read, targets, strict=True)
+    ]
+
+
+def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
+    unknown = [room.name for room in rooms if room.room_type == RoomType.OTHER]
+    if unknown:
+        return "тип помещения не определён: " + ", ".join(unknown)
+    overflow = [room.name for room in rooms if room.room_id is None]
+    if overflow:
+        return "в справочнике комнат нет места для: " + ", ".join(overflow)
+    return None
 
 
 def build_result(
     answer: dict[str, Any], bi_area: float | None, meta: KlRecognitionMeta
 ) -> KlRecognitionResult:
     doubts = [str(item) for item in answer.get("doubts") or []]
-    rooms = _rooms(answer.get("rooms"), doubts)
     checks_in = answer.get("checks") if isinstance(answer.get("checks"), dict) else {}
     sheet_total = _as_float(checks_in.get("sheetTotal", answer.get("totalArea")))
+    if answer.get("freeLayout") is True:
+        # Free layouts are not recognised at all: the agent stops before reading the rooms.
+        return KlRecognitionResult(
+            status=RecognitionStatus.FREE_LAYOUT,
+            reason=f"свободная планировка: {answer.get('freeLayoutReason') or 'спальня за пунктиром'}",
+            rooms=[],
+            total_area=sheet_total,
+            total_rooms=None,
+            checks=KlChecks(sheet_total=sheet_total, bi_area=bi_area),
+            doubts=doubts,
+            meta=meta,
+        )
+
+    rooms = _rooms(answer.get("rooms"), doubts)
 
     rooms_sum = round(sum(room.financial_area for room in rooms), 2)
     sheet_ok = None if sheet_total is None else abs(rooms_sum - sheet_total) <= SUM_TOLERANCE
     bi_ok = None if bi_area is None else abs(rooms_sum - bi_area) <= SUM_TOLERANCE
     unnamed = any(room.name.lower().startswith("не определ") for room in rooms)
+    unmapped = _unmapped_reason(rooms)
 
     if not rooms:
         status, reason = (
-            RecognitionStatus.MANUAL,
+            RecognitionStatus.NOT_RECOGNIZED,
             str(answer.get("reason") or "помещения не найдены"),
         )
     elif sheet_ok is None and bi_ok is None:
-        status, reason = RecognitionStatus.MANUAL, f"сумма комнат {rooms_sum}: не с чем сверить"
-    elif sheet_ok is not False and bi_ok is not False and not unnamed:
-        status = RecognitionStatus.AUTO
+        status = RecognitionStatus.NOT_RECOGNIZED
+        reason = f"сумма комнат {rooms_sum}: не с чем сверить"
+    elif sheet_ok is not False and bi_ok is not False and not unnamed and not unmapped:
+        status = RecognitionStatus.RECOGNIZED
         reason = f"сумма комнат {rooms_sum} = лист {sheet_total} = BI {bi_area}"
     else:
-        status = RecognitionStatus.MANUAL
+        status = RecognitionStatus.NOT_RECOGNIZED
         reason = f"сумма комнат {rooms_sum}, лист {sheet_total}, BI {bi_area}"
         if unnamed:
             reason += "; есть помещение без названия"
+        if unmapped:
+            reason += f"; {unmapped}"
 
     total_rooms = answer.get("totalRooms")
     return KlRecognitionResult(
         status=status,
         reason=reason,
-        rooms=rooms,
+        # Unrecognised sheets carry no rooms: the planirovka is entered by hand, and half-read
+        # rooms must not be mistaken for a result. Sums and doubts still explain what failed.
+        rooms=rooms if status is RecognitionStatus.RECOGNIZED else [],
         total_area=sheet_total if sheet_total is not None else rooms_sum,
         total_rooms=total_rooms if isinstance(total_rooms, int) else None,
         checks=KlChecks(

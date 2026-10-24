@@ -7,13 +7,23 @@ from loguru import logger
 from .client import BiLoadSheetClient, KlSheetDownloadError, KlSheetNotFoundError
 from .composer import ComposerClient, ComposerError
 from .plan_images import PlanPageMissingError
-from .result import build_result, first_json_object, manual_result
+from .result import build_result, first_json_object, not_recognized_result
 from .schemas import KlRecognitionMeta, KlRecognitionResult, KlRecognizeRequest
+from .storage_recheck import (
+    RECHECK_PROMPT_PATH,
+    apply_recheck,
+    recheck_prompt,
+    storages_to_recheck,
+)
 
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
 IMAGE_BUILDS_AT_ONCE = 2
 
 _image_semaphore: asyncio.Semaphore | None = None
+
+
+def _plus(a: int | None, b: int | None) -> int | None:
+    return None if a is None and b is None else (a or 0) + (b or 0)
 
 
 def _image_slots() -> asyncio.Semaphore:
@@ -27,7 +37,7 @@ class KlRecognitionService:
     """KL by flat GUID → plan images → Composer → rooms and areas with a checked status.
 
     Every failure that is about the sheet (no KL, no plan, agent gave no answer) becomes a
-    `manual` result: the caller always gets an answer to show the operator.
+    `not_recognized` result: the caller always gets an answer with the reason.
     """
 
     def __init__(
@@ -43,6 +53,7 @@ class KlRecognitionService:
         self._build_images = build_images
         self._model = model
         self._prompt_template = prompt_template or PROMPT_PATH.read_text(encoding="utf-8")
+        self._recheck_template = RECHECK_PROMPT_PATH.read_text(encoding="utf-8")
 
     async def recognize(self, request: KlRecognizeRequest) -> KlRecognitionResult:
         source = str(request.flat_guid or request.pdf_url)
@@ -58,7 +69,7 @@ class KlRecognitionService:
                 images = await asyncio.to_thread(self._build_images, pdf)
         except (KlSheetNotFoundError, KlSheetDownloadError, PlanPageMissingError) as exc:
             logger.info("KL {source}: {reason}", source=source, reason=exc)
-            return manual_result(str(exc), request.bi_area, meta)
+            return not_recognized_result(str(exc), request.bi_area, meta)
 
         bi_text = f"{request.bi_area:.2f}" if request.bi_area is not None else ""
         try:
@@ -67,7 +78,7 @@ class KlRecognitionService:
             )
         except ComposerError as exc:
             logger.warning("KL {source}: Composer failed: {reason}", source=source, reason=exc)
-            return manual_result(str(exc), request.bi_area, meta)
+            return not_recognized_result(str(exc), request.bi_area, meta)
 
         meta = KlRecognitionMeta(
             model=self._model,
@@ -80,14 +91,46 @@ class KlRecognitionService:
             logger.warning(
                 "KL {source}: answer without JSON: {text}", source=source, text=answer.text[:500]
             )
-            return manual_result("ответ агента без JSON", request.bi_area, meta)
+            return not_recognized_result("ответ агента без JSON", request.bi_area, meta)
 
+        meta = await self._recheck_storages(source, data, images, meta)
         result = build_result(data, request.bi_area, meta)
         logger.info(
             "KL {source}: {status} ({reason}), {seconds} s",
             source=source,
             status=result.status,
             reason=result.reason,
-            seconds=answer.seconds,
+            seconds=meta.seconds,
         )
         return result
+
+    async def _recheck_storages(
+        self, source: str, data: dict, images: list[bytes], meta: KlRecognitionMeta
+    ) -> KlRecognitionMeta:
+        """Asks once more about wardrobes and storerooms not tied to a room (see storage_recheck)."""
+        storages = storages_to_recheck(data)
+        if not storages:
+            return meta
+        try:
+            answer = await self._composer.read_plan(
+                recheck_prompt(self._recheck_template, data, storages), images
+            )
+        except ComposerError as exc:
+            # The first answer stands on its own: without the second look nothing is merged.
+            logger.warning(
+                "KL {source}: storage recheck failed: {reason}", source=source, reason=exc
+            )
+            return meta
+        found = apply_recheck(data, first_json_object(answer.text))
+        logger.info(
+            "KL {source}: storage recheck {found} of {asked}",
+            source=source,
+            found=found,
+            asked=len(storages),
+        )
+        return KlRecognitionMeta(
+            model=meta.model,
+            seconds=_plus(meta.seconds, answer.seconds),
+            input_tokens=_plus(meta.input_tokens, answer.input_tokens),
+            output_tokens=_plus(meta.output_tokens, answer.output_tokens),
+        )
