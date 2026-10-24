@@ -72,6 +72,8 @@ def test_storage_is_a_wardrobe_as_in_the_ocr_dictionary() -> None:
 def test_type_is_read_leniently_but_only_from_the_list() -> None:
     assert room_type(" спальня ") is T.BEDROOM
     assert room_type("Caнузел") is T.TOILET  # Latin «C» and «a»
+    assert room_type("Gостиная") is T.LIVING_ROOM  # a stray Latin letter (sheet 137232)
+    assert room_type("Зал") is None
     assert room_type("Сауна") is None
     assert room_type(None) is None
     assert names([T.OTHER], [10.0]) == [None]

@@ -7,6 +7,7 @@ that depend on several rooms and the numbering are here, the same as in
 """
 
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from enum import StrEnum
 
 
@@ -120,13 +121,19 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
 # Latin letters that look like Cyrillic ones: models sometimes mix them into Russian words.
 _LOOKALIKES = str.maketrans("aceopxykmthbACEOPXYKMTHB", "асеорхукмтнвАСЕОРХУКМТНВ")
 _BY_NAME = {kind.value.casefold(): kind for kind in RoomType}
+TYPE_MATCH_CUTOFF = 0.85
 
 
 def room_type(value: object) -> RoomType | None:
     """The type the agent gave; None when it is missing or not from the list."""
     if value is None:
         return None
-    return _BY_NAME.get(str(value).strip().translate(_LOOKALIKES).casefold())
+    key = str(value).strip().translate(_LOOKALIKES).casefold()
+    if key in _BY_NAME:
+        return _BY_NAME[key]
+    # one stray Latin letter («Gостиная»); a different word stays unknown
+    close = get_close_matches(key, _BY_NAME, n=1, cutoff=TYPE_MATCH_CUTOFF)
+    return _BY_NAME[close[0]] if close else None
 
 
 def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:
