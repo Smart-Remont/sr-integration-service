@@ -85,6 +85,10 @@ class KlRecognitionResult(BaseSchema):
     )
     reason: str = Field(description="Почему такой статус.")
     rooms: list[KlRoom]
+    terraces: list[KlRoomPart] = Field(
+        default_factory=list,
+        description="Террасы с листа: в сумме учтены, но комнатой системы не являются (площадь террасы хранится у квартиры).",
+    )
     total_area: float | None = Field(description="Общая площадь на листе (или сумма комнат).")
     total_rooms: int | None = Field(description="Комнатность из кружка у общей площади.")
     checks: KlChecks

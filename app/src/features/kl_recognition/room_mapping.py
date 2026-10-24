@@ -7,6 +7,7 @@ that depend on several rooms and the numbering are here, the same as in
 """
 
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from enum import StrEnum
 
 
@@ -71,6 +72,27 @@ MERGE_TARGETS: dict[RoomType, set[RoomType]] = {
 }
 
 
+# A balcony with one printed area: it is the reduced one (the sum check passes only then) and
+# operators enter the full area as printed / 0,3 (Sanat: 0,99 → 3,30, 1,08 → 3,60, 1,11 → 3,70).
+# For a loggia the coefficient on such sheets is not known, so it goes to manual check.
+BALCONY_COEFFICIENT = 0.3
+BALCONY_WORD = "балкон"
+
+
+def full_balcony_area(name: str, printed: float) -> float | None:
+    """Full area of a balcony printed with its reduced area only; None when it cannot be told."""
+    return round(printed / BALCONY_COEFFICIENT, 2) if BALCONY_WORD in name.casefold() else None
+
+
+# A terrace is not a room of the flat in the system: planirovki almost never hold one (27 of
+# 52 thousand since 2025), its area is kept on the flat (`flat_tab.terrace_area`).
+TERRACE_WORD = "террас"
+
+
+def is_terrace(name: str) -> bool:
+    return TERRACE_WORD in name.casefold()
+
+
 @dataclass(frozen=True)
 class SystemRoom:
     room_id: int
@@ -120,13 +142,19 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
 # Latin letters that look like Cyrillic ones: models sometimes mix them into Russian words.
 _LOOKALIKES = str.maketrans("aceopxykmthbACEOPXYKMTHB", "асеорхукмтнвАСЕОРХУКМТНВ")
 _BY_NAME = {kind.value.casefold(): kind for kind in RoomType}
+TYPE_MATCH_CUTOFF = 0.85
 
 
 def room_type(value: object) -> RoomType | None:
     """The type the agent gave; None when it is missing or not from the list."""
     if value is None:
         return None
-    return _BY_NAME.get(str(value).strip().translate(_LOOKALIKES).casefold())
+    key = str(value).strip().translate(_LOOKALIKES).casefold()
+    if key in _BY_NAME:
+        return _BY_NAME[key]
+    # one stray Latin letter («Gостиная»); a different word stays unknown
+    close = get_close_matches(key, _BY_NAME, n=1, cutoff=TYPE_MATCH_CUTOFF)
+    return _BY_NAME[close[0]] if close else None
 
 
 def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:
@@ -148,6 +176,13 @@ def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:
     )
     for i in hallways[1:]:
         resolved[i] = RoomType.CORRIDOR
+
+    # No hallway on the sheet: operators enter the only corridor as the hallway (468 of 481
+    # planirovki whose sheet has «Коридор» and neither «Прихожая» nor «Холл»). With several
+    # corridors they pick the smaller one 46 times and the larger 25 — no rule, left as is.
+    corridors = [i for i, kind in enumerate(resolved) if kind is RoomType.CORRIDOR]
+    if RoomType.HALLWAY not in resolved and len(corridors) == 1:
+        resolved[corridors[0]] = RoomType.HALLWAY
 
     toilets = [i for i, kind in enumerate(resolved) if kind is RoomType.TOILET]
     if toilets and RoomType.BATHROOM not in resolved:

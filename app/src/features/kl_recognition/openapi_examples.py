@@ -95,6 +95,7 @@ RECOGNIZE_RECOGNIZED = {
             "merged_from": [],
         },
     ],
+    "terraces": [],
     "total_area": 91.67,
     "total_rooms": 3,
     "checks": {
@@ -112,6 +113,7 @@ RECOGNIZE_FREE_LAYOUT = {
     "status": "free_layout",
     "reason": "свободная планировка: мастер-спальня отделена от гостиной пунктиром",
     "rooms": [],
+    "terraces": [],
     "total_area": None,
     "total_rooms": None,
     "checks": {
@@ -129,6 +131,7 @@ RECOGNIZE_SUM_MISMATCH = {
     "status": "not_recognized",
     "reason": "сумма комнат 114.76, лист 114.92, BI 114.92",
     "rooms": [],
+    "terraces": [],
     "total_area": 114.92,
     "total_rooms": 4,
     "checks": {
@@ -146,6 +149,7 @@ RECOGNIZE_NO_KL = {
     "status": "not_recognized",
     "reason": "BI не отдал КЛ (HTTP 500)",
     "rooms": [],
+    "terraces": [],
     "total_area": None,
     "total_rooms": None,
     "checks": {

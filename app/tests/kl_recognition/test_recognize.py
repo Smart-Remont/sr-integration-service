@@ -74,7 +74,8 @@ async def client(sheet_client: AsyncMock, composer: AsyncMock) -> AsyncIterator[
         composer=composer,
         build_images=lambda _pdf: [b"jpeg"] * 5,
         model="composer-2.5",
-        prompt_template="Площадь BI: `{BI_AREA}`",
+        prompt_template="Площадь BI: `{BI_AREA}`. Картинки: {IMAGES}",
+        build_page_images=lambda _pdf: [b"page"] * 5,
     )
     app.dependency_overrides[get_kl_recognition_service] = lambda: service
     transport = ASGITransport(app=app)
@@ -140,7 +141,8 @@ async def test_recognized_when_sum_matches_sheet_and_bi(
     assert result["total_rooms"] == 1
     assert result["meta"]["seconds"] == 17
     prompt, images = composer.read_plan.await_args.args
-    assert prompt == f"Площадь BI: `{ROOMS_SUM:.2f}`"
+    assert prompt.startswith(f"Площадь BI: `{ROOMS_SUM:.2f}`. Картинки: к сообщению приложены")
+    assert "вырезанный со стр. 2" in prompt
     assert len(images) == 5
 
 
@@ -176,7 +178,7 @@ async def test_room_of_unknown_type_is_not_recognized(
     composer.read_plan.return_value = composer_answer(rooms=rooms)
     result = await recognize(client)
     assert result["status"] == "not_recognized"
-    assert "тип помещения не определён: Сауна" in result["reason"]
+    assert "не определён тип или полная площадь помещения: Сауна" in result["reason"]
     assert result["rooms"] == []
 
 
@@ -270,6 +272,100 @@ async def test_no_second_look_when_every_wardrobe_is_tied_to_a_room(
     )
     await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": WARDROBE_SUM})
     assert composer.read_plan.await_count == 1
+
+
+async def test_whole_page_is_read_when_the_cut_plan_misses_rooms(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # The cut held only part of the plan: its rooms are far below the sheet total.
+    composer.read_plan.side_effect = [
+        composer_answer(rooms=ROOMS[:1], checks={"sheetTotal": ROOMS_SUM}),
+        composer_answer(),
+    ]
+    result = await recognize(client)
+
+    assert result["status"] == "recognized"
+    first, second = (call.args for call in composer.read_plan.await_args_list)
+    assert first[1] == [b"jpeg"] * 5 and "вырезанный со стр. 2" in first[0]
+    assert second[1] == [b"page"] * 5 and "стр. 2 квартирного листа целиком" in second[0]
+    assert result["meta"]["seconds"] == 17 * 2
+
+
+async def test_whole_page_is_read_when_no_plan_is_found_on_the_cut(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    composer.read_plan.side_effect = [
+        composer_answer(rooms=[], reason="нет плана на стр. 2", checks={}, totalArea=None),
+        composer_answer(),
+    ]
+    result = await recognize(client)
+    assert result["status"] == "recognized"
+    assert composer.read_plan.await_count == 2
+
+
+async def test_small_misprint_on_the_sheet_does_not_trigger_the_whole_page(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # 0.10 off the sheet total is a misprint on the sheet, not a bad cut.
+    composer.read_plan.return_value = composer_answer(checks={"sheetTotal": ROOMS_SUM + 0.1})
+    result = await recognize(client)
+    assert result["status"] == "not_recognized"
+    assert composer.read_plan.await_count == 1
+
+
+async def test_whole_page_failure_keeps_both_reasons(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    composer.read_plan.return_value = composer_answer(
+        rooms=ROOMS[:1], checks={"sheetTotal": ROOMS_SUM}
+    )
+    result = await recognize(client)
+    assert result["status"] == "not_recognized"
+    assert "по вырезке плана: сумма комнат" in result["reason"]
+    assert composer.read_plan.await_count == 2
+
+
+async def test_terrace_counts_in_the_sum_but_is_not_a_room(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # Darmen 2: a terrace 5,19 (1,56) and a loggia 2,84 (1,42) — operators enter only the loggia.
+    terrace = {"name": "Терраса", "type": "Балкон", "area": 5.19, "financialArea": 1.56}
+    total = round(ROOMS_SUM + 1.56, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=[*ROOMS, terrace], checks={"sheetTotal": total}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+
+    assert result["status"] == "recognized"
+    assert result["checks"]["rooms_sum"] == total
+    assert [r["name"] for r in result["rooms"]] == ["Кухня", "Лоджия", "Гостиная"]
+    assert next(r for r in result["rooms"] if r["name"] == "Лоджия")["system_name"] == "Балкон"
+    assert result["terraces"] == [{"name": "Терраса", "area": 5.19}]
+
+
+async def test_balcony_with_one_printed_area_gets_the_full_area(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # Sanat: only the reduced area 0,99 is printed; operators enter 0,99 / 0,3 = 3,30.
+    balcony = {"name": "Балкон", "type": "Балкон", "area": 0.99, "financialArea": 0.99}
+    total = round(ROOMS[0]["area"] + ROOMS[2]["area"] + 0.99, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=[ROOMS[0], ROOMS[2], balcony], checks={"sheetTotal": total}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+    assert result["status"] == "recognized"
+    room = next(r for r in result["rooms"] if r["name"] == "Балкон")
+    assert (room["area"], room["financial_area"]) == (3.3, 0.99)
+
+
+async def test_loggia_with_one_printed_area_is_not_recognized(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    loggia = {"name": "Лоджия", "type": "Балкон", "area": 1.54, "financialArea": 1.54}
+    composer.read_plan.return_value = composer_answer(rooms=[ROOMS[0], loggia, ROOMS[2]])
+    result = await recognize(client)
+    assert result["status"] == "not_recognized"
+    assert "Лоджия" in result["reason"]
 
 
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:

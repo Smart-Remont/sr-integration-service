@@ -53,6 +53,12 @@ def test_second_hallway_is_a_corridor() -> None:
     ]
 
 
+def test_the_only_corridor_is_the_hallway_when_the_sheet_has_none() -> None:
+    assert names([T.CORRIDOR, T.KITCHEN], [3.61, 11.43]) == ["Прихожая", "Кухня"]
+    # several corridors: operators pick either one, so none is renamed
+    assert names([T.CORRIDOR, T.CORRIDOR], [5.0, 3.0]) == ["Коридор", "Коридор №2"]
+
+
 def test_largest_toilet_is_bathroom_when_there_is_none() -> None:
     assert names([T.TOILET, T.TOILET], [2.1, 3.2]) == ["Санузел", "Ванная"]
 
@@ -72,6 +78,8 @@ def test_storage_is_a_wardrobe_as_in_the_ocr_dictionary() -> None:
 def test_type_is_read_leniently_but_only_from_the_list() -> None:
     assert room_type(" спальня ") is T.BEDROOM
     assert room_type("Caнузел") is T.TOILET  # Latin «C» and «a»
+    assert room_type("Gостиная") is T.LIVING_ROOM  # a stray Latin letter (sheet 137232)
+    assert room_type("Зал") is None
     assert room_type("Сауна") is None
     assert room_type(None) is None
     assert names([T.OTHER], [10.0]) == [None]
