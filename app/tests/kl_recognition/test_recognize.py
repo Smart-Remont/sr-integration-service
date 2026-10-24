@@ -212,6 +212,66 @@ async def test_storage_behind_a_dashed_line_is_merged_without_changing_the_sum(
     assert len(result["rooms"]) == 3
 
 
+WARDROBE_ROOMS = [
+    *ROOMS,
+    {"name": "Спальня", "type": "Спальня", "area": 14.21, "financialArea": 14.21},
+    {"name": "Гард.", "type": "Гардеробная", "area": 2.11, "financialArea": 2.11, "openTo": None},
+]
+WARDROBE_SUM = round(ROOMS_SUM + 14.21 + 2.11, 2)
+
+
+def recheck_answer(open_to: dict | None) -> ComposerAnswer:
+    body = {"storages": [{"name": "Гард.", "area": 2.11, "openTo": open_to}]}
+    return ComposerAnswer(
+        text=json.dumps(body, ensure_ascii=False), seconds=8, input_tokens=17500, output_tokens=90
+    )
+
+
+async def test_wardrobe_missed_in_the_first_answer_is_asked_again_and_merged(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    composer.read_plan.side_effect = [
+        composer_answer(rooms=WARDROBE_ROOMS, checks={"sheetTotal": WARDROBE_SUM}),
+        recheck_answer({"name": "Спальня", "area": 14.21}),
+    ]
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": WARDROBE_SUM})
+
+    assert composer.read_plan.await_count == 2
+    second_prompt = composer.read_plan.await_args_list[1].args[0]
+    assert "- Гард. 2.11" in second_prompt
+    assert result["status"] == "recognized"
+    bedroom = next(r for r in result["rooms"] if r["room_type"] == "Спальня")
+    assert bedroom["area"] == 16.32
+    assert [p["name"] for p in bedroom["merged_from"]] == ["Спальня", "Гард."]
+    assert result["meta"]["seconds"] == 17 + 8
+
+
+async def test_wardrobe_stays_separate_when_the_second_look_finds_a_wall(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    composer.read_plan.side_effect = [
+        composer_answer(rooms=WARDROBE_ROOMS, checks={"sheetTotal": WARDROBE_SUM}),
+        recheck_answer(None),
+    ]
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": WARDROBE_SUM})
+    assert result["status"] == "recognized"
+    assert any(r["system_name"] == "Гардеробная" and r["area"] == 2.11 for r in result["rooms"])
+
+
+async def test_no_second_look_when_every_wardrobe_is_tied_to_a_room(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *WARDROBE_ROOMS[:-1],
+        {**WARDROBE_ROOMS[-1], "openTo": {"name": "Спальня", "area": 14.21}},
+    ]
+    composer.read_plan.return_value = composer_answer(
+        rooms=rooms, checks={"sheetTotal": WARDROBE_SUM}
+    )
+    await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": WARDROBE_SUM})
+    assert composer.read_plan.await_count == 1
+
+
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
     rooms = [*ROOMS[:2], {"name": "Гостиная", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
     composer.read_plan.return_value = composer_answer(rooms=rooms)

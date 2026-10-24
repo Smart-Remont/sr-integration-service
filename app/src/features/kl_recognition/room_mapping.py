@@ -60,11 +60,15 @@ CHAINS: dict[RoomType, list[tuple[int, str]]] = {
 STORAGE_AS = RoomType.WARDROBE
 # `flat_image__create_flat_image_room`: a toilet this large is a bathroom.
 BATHROOM_MIN_AREA = 3.5
-# A storeroom behind only a dashed line is part of the kitchen: operators add its area to it
-# (MERIDIAN 201: 11,19 + 3,16; 168; Arman Qala). Wardrobes and niches they keep as rooms of
-# their own (MERIDIAN 229, 292, Crystal, Samgar, Sapa, Biography), so those are not merged.
-MERGEABLE = {RoomType.STORAGE}
-MERGE_TARGETS = {RoomType.KITCHEN}
+# A storeroom or wardrobe behind only a dashed line is part of the room it opens into, and
+# operators add its area to that room: storerooms to the kitchen (MERIDIAN 201: 11,19 + 3,16;
+# 168; Arman Qala), wardrobes to the bedroom or the hallway (planirovki since 09.2025: Aisar 4
+# 14,21 + 2,11; Batysmura Prime 14,32 + 4,00; Asyl Zaman 18,09 + 3,55 and hallway 3,96 + 2,67;
+# Samğar, Alem Sana). Wardrobes in a «Холл» stay separate, as on MERIDIAN 1.
+MERGE_TARGETS: dict[RoomType, set[RoomType]] = {
+    RoomType.STORAGE: {RoomType.KITCHEN},
+    RoomType.WARDROBE: {RoomType.BEDROOM, RoomType.HALLWAY},
+}
 
 
 @dataclass(frozen=True)
@@ -85,11 +89,12 @@ class ReadRoom:
 
 
 def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoom]:
-    """Adds storerooms behind a dashed line to the kitchen they open into."""
+    """Adds storerooms and wardrobes behind a dashed line to the room they open into."""
     original_areas = [room.area for room in rooms]
     absorbed: set[int] = set()
     for i, room in enumerate(rooms):
-        if room.kind not in MERGEABLE or room.open_to is None:
+        targets = MERGE_TARGETS.get(room.kind)
+        if not targets or room.open_to is None:
             continue
         name, area = room.open_to
         candidates = [
@@ -99,7 +104,7 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
         ]
         if len(candidates) > 1:
             candidates = [j for j in candidates if rooms[j].name == name] or candidates
-        if len(candidates) != 1 or rooms[candidates[0]].kind not in MERGE_TARGETS:
+        if len(candidates) != 1 or rooms[candidates[0]].kind not in targets:
             doubts.append(f"«{room.name}» {room.area} за пунктиром у «{name}» {area} не объединён")
             continue
         parent = rooms[candidates[0]]

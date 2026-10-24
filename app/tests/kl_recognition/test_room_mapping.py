@@ -99,11 +99,36 @@ def test_two_storerooms_into_one_kitchen_match_its_printed_area() -> None:
     assert [(r.name, r.area) for r in rooms] == [("Кухня", 12.0)]
 
 
-def test_wardrobe_behind_a_dashed_line_stays_a_room_of_its_own() -> None:
-    # Operators keep «Гардероб» separate even when only a dashed line divides it.
-    bedroom = ReadRoom("Спальня", 12.06, 12.06, T.BEDROOM)
-    wardrobe = ReadRoom("Ниша для шк.", 5.15, 5.15, T.WARDROBE, ("Спальня", 12.06))
-    assert len(merge_open_storage([bedroom, wardrobe], [])) == 2
+def test_wardrobe_behind_a_dashed_line_is_added_to_the_bedroom_or_hallway() -> None:
+    # As operators enter it since 09.2025: Aisar 4 bedroom 16,32 = 14,21 + 2,11.
+    bedroom = ReadRoom("Спальня", 14.21, 14.21, T.BEDROOM)
+    hallway = ReadRoom("Прихожая", 3.96, 3.96, T.HALLWAY)
+    rooms = merge_open_storage(
+        [
+            bedroom,
+            hallway,
+            ReadRoom("Гард.", 2.11, 2.11, T.WARDROBE, ("Спальня", 14.21)),
+            ReadRoom("Гард.", 2.67, 2.67, T.WARDROBE, ("Прихожая", 3.96)),
+        ],
+        [],
+    )
+    assert [(r.name, r.area) for r in rooms] == [("Спальня", 16.32), ("Прихожая", 6.63)]
+
+
+def test_wardrobe_open_to_a_hall_or_storeroom_open_to_a_bedroom_stays_separate() -> None:
+    # MERIDIAN 1 keeps the wardrobe in a «Холл» apart; a storeroom joins only the kitchen.
+    hall = ReadRoom("Холл", 14.53, 14.53, T.HALL)
+    bedroom = ReadRoom("Спальня", 15.0, 15.0, T.BEDROOM)
+    rooms = merge_open_storage(
+        [
+            hall,
+            bedroom,
+            ReadRoom("Гардероб", 2.18, 2.18, T.WARDROBE, ("Холл", 14.53)),
+            storage("Клад.", 2.0, ("Спальня", 15.0)),
+        ],
+        [],
+    )
+    assert len(rooms) == 4
 
 
 def test_storage_behind_a_wall_or_open_to_a_corridor_stays_separate() -> None:
