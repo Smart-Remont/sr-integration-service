@@ -138,17 +138,11 @@ app/
 
 ### Крон
 
-Задачи, которые сервер должен дёргать по расписанию. Новую задачу — сюда же.
+Расписание живёт в базе: функции `cronrun__every_10_minutes`, `cronrun__every_2_hours` и т.д. (их вызывает планировщик БД, лог — `cron_log_tab`). Ручку сервиса из крона вызывает функция БД через расширение `http`. Новую задачу — сюда же.
 
-| Что | Расписание | Вызов |
+| Что | Расписание | Как вызывается |
 |---|---|---|
-| Рассрочка Freedom: сверка заявок с банком — статусы без хука, запись выданных в сделку, закрытие неотправленных, итог возвратов | каждые 10 минут | `GET /api/v1/installment/ff/reconcile`, Basic `INSTALLMENT_API_*` |
-
-```cron
-*/10 * * * * curl -fsS -m 300 -u "$INSTALLMENT_API_USER:$INSTALLMENT_API_PASSWORD" https://integration.smart-remont.kz/api/v1/installment/ff/reconcile >/dev/null
-```
-
-На тестовом стенде — тот же вызов на `https://devintegration.smart-remont.kz`.
+| Рассрочка Freedom: сверка заявок с банком — статусы без хука, запись выданных в сделку, закрытие неотправленных, итог возвратов | каждые 10 минут | `cronrun__every_10_minutes` → `cron__installment_reconcile()` → `GET /api/v1/installment/ff/reconcile` (Basic из `integration_credential_tab`, провайдер FF, `env = sr_reconcile_cron`). SQL: `../myspace/sql/freedom-installment/29_reconcile_cron.sql` |
 
 ## Технический долг
 
