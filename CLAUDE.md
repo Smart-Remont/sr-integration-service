@@ -136,6 +136,20 @@ app/
 - `GET /health` — процесс жив; `GET /health/ready` — есть связь с PostgreSQL.
 - Пул БД: `DB_POOL_MAX_SIZE` на каждый воркер gunicorn, всего соединений = `GUNICORN_WORKERS × DB_POOL_MAX_SIZE`.
 
+### Крон
+
+Задачи, которые сервер должен дёргать по расписанию. Новую задачу — сюда же.
+
+| Что | Расписание | Вызов |
+|---|---|---|
+| Рассрочка Freedom: сверка заявок с банком — статусы без хука, запись выданных в сделку, закрытие неотправленных, итог возвратов | каждые 10 минут | `GET /api/v1/installment/ff/reconcile`, Basic `INSTALLMENT_API_*` |
+
+```cron
+*/10 * * * * curl -fsS -m 300 -u "$INSTALLMENT_API_USER:$INSTALLMENT_API_PASSWORD" https://integration.smart-remont.kz/api/v1/installment/ff/reconcile >/dev/null
+```
+
+На тестовом стенде — тот же вызов на `https://devintegration.smart-remont.kz`.
+
 ## Технический долг
 
 Не копировать эти приёмы в новый код; закрывать по мере работы с файлом.
