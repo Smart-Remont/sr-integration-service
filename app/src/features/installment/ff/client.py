@@ -116,6 +116,25 @@ class FFClient:
             resolve_ip=resolve_ip,
         )
 
+    async def send_goods_loan_refund(
+        self,
+        base_url: str,
+        access_token: str,
+        payload: dict[str, Any],
+        *,
+        resolve_ip: str | None = None,
+    ) -> dict[str, Any]:
+        """FFC2 «Сервис возврата для крупных партнеров»: 200 {"message": "success"}
+        after validation; the Colvir result comes later to payload["hook_url"]."""
+        return await self._request(
+            method="POST",
+            base_url=base_url,
+            path="/ffc-api-public/custom/refund/goods-loan-refund/",
+            json=payload,
+            headers=self._auth_header(access_token),
+            resolve_ip=resolve_ip,
+        )
+
     async def get_goods_application_info(
         self,
         base_url: str,
@@ -227,8 +246,16 @@ class FFClient:
         detail: str
         if isinstance(payload, dict):
             message = payload.get("message") or payload.get("detail")
+            description = payload.get("description")
             field_errors = FFClient._field_errors(payload)
-            if isinstance(message, str) and message.strip():
+            if (
+                # Refund API: {"message": "error", "description": "<why>"}
+                isinstance(description, str)
+                and description.strip()
+                and (not isinstance(message, str) or message.strip().lower() == "error")
+            ):
+                detail = description.strip()
+            elif isinstance(message, str) and message.strip():
                 detail = message
             elif field_errors:
                 detail = f"Банк отклонил заявку: {field_errors}"

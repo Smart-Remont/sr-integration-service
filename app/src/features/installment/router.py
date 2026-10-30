@@ -23,10 +23,13 @@ from .schemas import (
     ApplyInstallmentApplicationResponse,
     CreateInstallmentApplicationRequest,
     CreateInstallmentApplicationResponse,
+    CreateInstallmentRefundRequest,
     FFProductsResponse,
     FFWebhookPayload,
     InstallmentApplicationListResponse,
     InstallmentApplicationResponse,
+    InstallmentRefundResponse,
+    InstallmentRefundWebhookPayload,
     ProviderProductListResponse,
     ReconcileResponse,
     SyncProductsResponse,
@@ -228,6 +231,60 @@ async def poll_application(
     if context is not None:
         context.require_application(SCOPE_INSTALLMENT, application_id)
     return await ff_service.poll_application(application_id)
+
+
+@router.post(
+    "/applications/{application_id}/refund",
+    response_model=InstallmentRefundResponse,
+    summary="Вернуть займ в банк (расторжение)",
+    description=(
+        "Отправляет в Freedom `goods-loan-refund` по выданной рассрочке. REFUND — весь остаток займа, "
+        "PARTIAL_REFUND — часть (`refund_amount` меньше остатка). Банк отвечает сразу, итог (Colvir) "
+        "приходит хуком на `/webhook/refund`; полный успешный возврат закрывает заявку (REVERSED). "
+        "504 — банк не ответил: запрос мог дойти, итог подтянет хук или `/reconcile`."
+    ),
+)
+async def create_refund(
+    _: InstallmentBasicAuthDep,
+    context: IntegrationContextDep,
+    application_id: Annotated[
+        int,
+        Path(description="ID в installment_application_tab", examples=[1]),
+    ],
+    request: CreateInstallmentRefundRequest,
+    ff_service: FFServiceDep,
+) -> InstallmentRefundResponse:
+    if context is not None:
+        context.require_application(SCOPE_INSTALLMENT, application_id)
+        request = request.model_copy(
+            update={
+                "requested_by": employee_id_from_context(context, fallback=request.requested_by)
+            }
+        )
+    return await ff_service.create_refund(application_id, request)
+
+
+@router.post(
+    "/webhook/refund",
+    response_model=WebhookAckResponse,
+    summary="Webhook Freedom: итог возврата",
+    description=(
+        "Банк присылает `{uuid, partner_id, refund_type, refund_amount, covlir_status}` после Colvir. "
+        "Basic Auth — как у основного хука. Повтор и хук без запроса возврата принимаются (200) и "
+        "пишутся в журнал."
+    ),
+)
+async def webhook_refund(
+    request: Request,
+    body: InstallmentRefundWebhookPayload,
+    ff_service: FFServiceDep,
+) -> WebhookAckResponse:
+    payload = body.model_dump(mode="json")
+    if body.__pydantic_extra__:
+        payload.update(body.__pydantic_extra__)
+    return await ff_service.handle_refund_webhook(
+        payload, authorization_header=request.headers.get("Authorization")
+    )
 
 
 @router.get(

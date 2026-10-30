@@ -22,8 +22,10 @@ from ..schemas import (
     ApplyInstallmentApplicationResponse,
     CreateInstallmentApplicationRequest,
     CreateInstallmentApplicationResponse,
+    CreateInstallmentRefundRequest,
     FFProductsResponse,
     InstallmentApplicationResponse,
+    InstallmentRefundResponse,
     ProviderProductListResponse,
     ProviderProductResponse,
     ReconcileResponse,
@@ -51,7 +53,14 @@ FF_APPLICATION_STATUSES = frozenset(
         "REJECTED",
     }
 )
-TERMINAL_STATUSES = frozenset({"ISSUED", "REJECTED"})
+# REVERSED — loan fully refunded to the bank (installment__application_refund_result).
+TERMINAL_STATUSES = frozenset({"ISSUED", "REJECTED", "REVERSED"})
+# Poll statuses of a refund on the bank side; our own status stays ISSUED/REVERSED,
+# the refund lives in refund_status.
+FF_REFUND_STATUSES = frozenset({"PROCESSING_REFUND", "REFUND", "PARTIAL_REFUND"})
+# The bank moves an application to PROCESSING_REFUND before it answers 200; if a
+# REQUESTED refund still shows ISSUED after this long, the bank did not take it.
+REFUND_DECLINE_AFTER = timedelta(minutes=10)
 
 # Top-level fields of a hook / poll answer kept next to the loan params:
 # the borrower's name and IIN go into the deal, the contract number into
@@ -66,6 +75,11 @@ _BANK_IDENTITY_FIELDS = (
     "channel",
     "status_reason",
     "alternative_reason",
+)
+
+REFUND_UNKNOWN_DETAIL = (
+    "Банк не ответил на запрос возврата вовремя. Запрос мог дойти: итог придёт от банка "
+    "или подтянется сверкой. Повторно не отправляйте."
 )
 
 APPLY_UNKNOWN_DETAIL = (
@@ -472,7 +486,10 @@ class FFService:
             raise mapped from exc
 
         polled_status = self._extract_poll_status(response_payload)
-        if polled_status not in FF_APPLICATION_STATUSES:
+        bank_status = polled_status
+        if polled_status in FF_REFUND_STATUSES:
+            polled_status = application.status
+        elif polled_status not in FF_APPLICATION_STATUSES:
             # Refund statuses and anything new: keep ours, the event log has it.
             await self._log_event(
                 "POLL_UNSUPPORTED_STATUS",
@@ -518,6 +535,8 @@ class FFService:
             },
         )
         await self._try_auto_apply_on_issued(application_id)
+        if application.refund_status == "REQUESTED":
+            await self._refund_result_from_poll(application, bank_status)
         updated_application = await self.ff_repository.get_application_by_id(application_id)
         if updated_application is None:
             raise HTTPException(
@@ -544,6 +563,10 @@ class FFService:
                 },
             )
             raise
+
+        if self._extract_string(payload, "covlir_status"):
+            # The refund result was sent to the general hook URL.
+            return await self._apply_refund_webhook(payload)
 
         status_value = self._extract_status(payload)
         uuid = self._extract_string(payload, "uuid") or self._extract_string(payload, "lead_id")
@@ -685,11 +708,18 @@ class FFService:
         the main channel; this covers lost hooks and a lost apply answer."""
         rows = await self.ff_repository.list_for_reconcile(stale_minutes=stale_minutes, limit=limit)
         now = datetime.now(UTC)
-        polled = changed = applied = expired = errors = 0
+        polled = changed = applied = expired = errors = refunds = 0
 
         for row in rows:
             application_id = row["id"]
             try:
+                if row.get("refund_status") == "REQUESTED":
+                    updated = await self.poll_application(application_id)
+                    polled += 1
+                    if updated.refund_status != "REQUESTED":
+                        refunds += 1
+                    continue
+
                 if row["status"] == "ISSUED":
                     if await self._try_auto_apply_on_issued(application_id):
                         applied += 1
@@ -736,7 +766,230 @@ class FFService:
             applied=applied,
             expired=expired,
             errors=errors,
+            refunds=refunds,
         )
+
+    # --- refund (goods-loan-refund) -------------------------------------------
+
+    async def create_refund(
+        self,
+        application_id: int,
+        request: CreateInstallmentRefundRequest,
+    ) -> InstallmentRefundResponse:
+        """Send a refund of an issued loan to the bank (contract termination).
+
+        installment__application_refund_request checks what the bank checks and
+        marks REQUESTED before the call, committed: a second click is refused and
+        a lost answer is resolved by the bank's hook or by reconcile."""
+        application = await self.get_application_by_id(application_id)
+        provider = await self._require_provider()
+        # The result arrives only as a hook: without our hook credentials the
+        # bank cannot report it.
+        await self._require_webhook_credentials()
+
+        try:
+            prepared = await self.ff_repository.committed(
+                lambda repo: repo.request_refund(
+                    application_id=application.id,
+                    refund_type=request.refund_type,
+                    refund_amount=request.refund_amount,
+                    requested_by=request.requested_by,
+                )
+            )
+        except StoredProcedureError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.message
+            ) from exc
+
+        amount = Decimal(str(prepared["refund_amount"]))
+        bank_payload = {
+            "uuid": prepared["uuid"],
+            "partner_id": self._required_config_value(provider, "partner_id"),
+            "refund_type": prepared["refund_type"],
+            "refund_amount": float(amount),
+            "hook_url": self._refund_hook_url(provider),
+        }
+        await self._log_event(
+            "REFUND_REQUEST",
+            installment_id=application.id,
+            source="FF",
+            payload={"request": bank_payload, "requested_by": request.requested_by},
+        )
+
+        ff_kwargs = self._ff_request_kwargs(provider)
+        try:
+            response_payload = await self._call_with_reauth(
+                provider,
+                lambda token: self.ff_client.send_goods_loan_refund(
+                    access_token=token,
+                    payload=bank_payload,
+                    **ff_kwargs,
+                ),
+            )
+        except FFClientError as exc:
+            if exc.maybe_sent:
+                await self._log_event(
+                    "REFUND_UNKNOWN",
+                    installment_id=application.id,
+                    source="FF",
+                    payload={"error": exc.detail},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=REFUND_UNKNOWN_DETAIL
+                ) from exc
+            mapped = self._map_ff_error(exc)
+            await self._refund_rejected(application.id, error=str(mapped.detail))
+            raise mapped from exc
+        except HTTPException as exc:
+            # Login to the bank failed: the refund never left us.
+            await self._refund_rejected(application.id, error=self._extract_error_message(exc))
+            raise
+
+        message = self._extract_string(response_payload, "message")
+        if message is not None and message.lower() != "success":
+            description = (
+                self._extract_string(response_payload, "description") or "Банк отклонил возврат."
+            )
+            await self._refund_rejected(application.id, error=description)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=description
+            )
+
+        await self._log_event(
+            "REFUND_ACCEPTED",
+            installment_id=application.id,
+            source="FF",
+            payload={"response": response_payload},
+        )
+        return InstallmentRefundResponse(
+            id=application.id,
+            uuid=prepared["uuid"],
+            refund_type=prepared["refund_type"],
+            refund_amount=amount,
+            refund_status="REQUESTED",
+            loan_amount=Decimal(str(prepared["loan_amount"])),
+            refunded_before=Decimal(str(prepared["refunded_before"])),
+            bank_message=message,
+        )
+
+    async def handle_refund_webhook(
+        self,
+        payload: dict[str, Any],
+        *,
+        authorization_header: str | None,
+    ) -> WebhookAckResponse:
+        try:
+            await self._verify_webhook_auth(authorization_header)
+        except HTTPException as exc:
+            await self._log_event(
+                "WEBHOOK_AUTH_FAILED",
+                source="FF",
+                payload={"error": self._extract_error_message(exc), "hook": payload},
+            )
+            raise
+        return await self._apply_refund_webhook(payload)
+
+    async def _apply_refund_webhook(self, payload: dict[str, Any]) -> WebhookAckResponse:
+        """Bank hook after Colvir: {uuid, partner_id, refund_type, refund_amount,
+        covlir_status: SUCCESS | DECLINE} (the bank spells it «covlir»)."""
+        uuid = self._extract_string(payload, "uuid")
+        covlir_status = (self._extract_string(payload, "covlir_status") or "").upper()
+        if not uuid or covlir_status not in {"SUCCESS", "DECLINE"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Refund hook must include uuid and covlir_status SUCCESS | DECLINE.",
+            )
+        refund_amount = self._decimal_or_none(payload.get("refund_amount"))
+        try:
+            result = await self.ff_repository.committed(
+                lambda repo: repo.refund_result(
+                    uuid=uuid, covlir_status=covlir_status, refund_amount=refund_amount
+                )
+            )
+        except StoredProcedureError as exc:
+            # Unknown uuid or no refund in progress: ack so the bank does not
+            # retry, keep the hook in the log for a manual look.
+            await self._log_event(
+                "REFUND_WEBHOOK_UNEXPECTED",
+                source="FF",
+                payload={"error": exc.message, "hook": payload},
+            )
+            return WebhookAckResponse(ok=True, status=True)
+
+        await self._log_event(
+            "REFUND_RESULT" if result.get("changed") else "REFUND_WEBHOOK_DUPLICATE",
+            installment_id=result.get("application_id"),
+            source="FF",
+            payload={"source": "webhook", "hook": payload, "result": result},
+        )
+        return WebhookAckResponse(ok=True, status=True)
+
+    async def _refund_result_from_poll(
+        self, application: InstallmentApplicationResponse, bank_status: str
+    ) -> None:
+        """A REQUESTED refund whose hook did not come: infer the result from the
+        bank's application status. A repeated partial refund cannot be told
+        apart from the previous one by status — left for the hook / a manual look."""
+        result: str | None = None
+        if (bank_status == "REFUND" and application.refund_type == "REFUND") or (
+            bank_status == "PARTIAL_REFUND"
+            and application.refund_type == "PARTIAL_REFUND"
+            and not application.refund_amount
+        ):
+            result = "SUCCESS"
+        elif bank_status == "ISSUED":
+            requested_at = application.refund_requested_at
+            if requested_at is not None and datetime.now(UTC) - requested_at > REFUND_DECLINE_AFTER:
+                result = "DECLINE"
+        if result is None:
+            if bank_status != "PROCESSING_REFUND":
+                await self._log_event(
+                    "REFUND_NEEDS_CHECK",
+                    installment_id=application.id,
+                    source="INSTALLMENT",
+                    payload={"bank_status": bank_status, "refund_type": application.refund_type},
+                )
+            return
+        changed = await self.ff_repository.committed(
+            lambda repo: repo.refund_result(application_id=application.id, covlir_status=result)
+        )
+        await self._log_event(
+            "REFUND_RESULT",
+            installment_id=application.id,
+            source="INSTALLMENT",
+            payload={"source": "poll", "bank_status": bank_status, "result": changed},
+        )
+
+    async def _refund_rejected(self, application_id: int, *, error: str) -> None:
+        await self._log_event(
+            "REFUND_REJECTED",
+            installment_id=application_id,
+            source="FF",
+            payload={"error": error},
+        )
+        try:
+            await self.ff_repository.committed(lambda repo: repo.clear_refund(application_id))
+        except Exception as clear_exc:
+            logger.warning(
+                "Failed to clear REQUESTED refund | application_id={id} error={error}",
+                id=application_id,
+                error=clear_exc,
+            )
+
+    def _refund_hook_url(self, provider: FFProvider) -> str:
+        explicit = provider.config.get("refund_hook_url")
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        return f"{self._required_config_value(provider, 'hook_url').rstrip('/')}/refund"
+
+    @staticmethod
+    def _decimal_or_none(value: Any) -> Decimal | None:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        try:
+            return Decimal(str(value))
+        except ArithmeticError:
+            return None
 
     async def _require_provider(self) -> FFProvider:
         provider = await self.ff_repository.get_provider_by_code("FF")

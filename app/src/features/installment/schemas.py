@@ -220,6 +220,20 @@ class InstallmentApplicationResponse(BaseSchema):
     client_request_credit_detail_id: int | None = None
     credit_contract: str | None = None
     issued_at: datetime | None = None
+    loan_amount: Decimal | None = Field(
+        default=None, description="Сумма займа: одобренная банком, иначе запрошенная"
+    )
+    refund_type: str | None = Field(default=None, description="REFUND | PARTIAL_REFUND")
+    refund_status: str | None = Field(
+        default=None, description="REQUESTED — ждём банк; SUCCESS | DECLINE — ответ банка"
+    )
+    refund_amount: Decimal | None = Field(
+        default=None, description="Сколько всего успешно возвращено в банк"
+    )
+    refund_requested_amount: Decimal | None = None
+    refund_requested_by: int | None = None
+    refund_requested_at: datetime | None = None
+    refund_completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -262,8 +276,9 @@ class FFWebhookPayload(BaseSchema):
         },
     )
 
-    status: str = Field(
-        description="REJECTED | APPROVED | ALTERNATIVE | ISSUED",
+    status: str | None = Field(
+        default=None,
+        description="REJECTED | APPROVED | ALTERNATIVE | ISSUED (нет у хука о возврате)",
         examples=["APPROVED"],
     )
     uuid: str | None = Field(default=None, examples=["fc58a802-ce40-4c8b-9cff-9f11930e1702"])
@@ -276,12 +291,48 @@ class FFWebhookPayload(BaseSchema):
     alternative_reason: str | None = Field(default=None, examples=[""])
 
 
+class CreateInstallmentRefundRequest(BaseSchema):
+    refund_type: Literal["REFUND", "PARTIAL_REFUND"] = Field(
+        default="REFUND",
+        description="REFUND — весь остаток займа (расторжение); PARTIAL_REFUND — часть",
+    )
+    refund_amount: Decimal | None = Field(
+        default=None,
+        description="Сумма частичного возврата. Для REFUND не нужна — берётся остаток займа",
+    )
+    requested_by: int = Field(description="employee_id, кто запускает возврат", examples=[42])
+
+
+class InstallmentRefundResponse(BaseSchema):
+    id: int
+    uuid: str
+    refund_type: str
+    refund_amount: Decimal
+    refund_status: str = Field(
+        description="REQUESTED — банк принял запрос; итог придёт хуком или сверкой"
+    )
+    loan_amount: Decimal
+    refunded_before: Decimal
+    bank_message: str | None = None
+
+
+class InstallmentRefundWebhookPayload(BaseSchema):
+    model_config = ConfigDict(extra="allow")
+
+    uuid: str | None = None
+    partner_id: str | None = None
+    refund_type: str | None = None
+    refund_amount: Decimal | None = None
+    covlir_status: str | None = Field(default=None, description="SUCCESS | DECLINE")
+
+
 class ReconcileResponse(BaseSchema):
     checked: int = Field(description="Сколько заявок взято на сверку")
     polled: int = Field(description="Сколько статусов запрошено у банка")
     changed: int = Field(description="У скольких заявок изменился статус")
     applied: int = Field(description="Сколько выданных заявок записано в сделку")
     expired: int = Field(description="Сколько заявок без ответа банка закрыто как неотправленные")
+    refunds: int = Field(default=0, description="По скольким возвратам получен итог из банка")
     errors: int = Field(description="Сколько заявок не удалось сверить")
 
 

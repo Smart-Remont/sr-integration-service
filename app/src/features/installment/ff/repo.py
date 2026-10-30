@@ -217,6 +217,72 @@ class FFRepository(BaseRepository):
             )
         )
 
+    async def request_refund(
+        self,
+        *,
+        application_id: int,
+        refund_type: str,
+        refund_amount: Decimal | None,
+        requested_by: int,
+    ) -> dict[str, Any]:
+        payload = {
+            "application_id": application_id,
+            "refund_type": refund_type,
+            "refund_amount": str(refund_amount) if refund_amount is not None else None,
+            "requested_by": requested_by,
+        }
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__application_refund_request",
+                    json.dumps(payload),
+                    session_user_id=requested_by,
+                    module_code="MYSPACE",
+                )
+            )
+        )
+
+    async def clear_refund(self, application_id: int) -> None:
+        scalar_from_sp_rows(
+            await self.call_sp(
+                "public.installment__application_refund_clear",
+                json.dumps({"application_id": application_id}),
+                module_code="MYSPACE",
+            )
+        )
+
+    async def refund_result(
+        self,
+        *,
+        covlir_status: str,
+        application_id: int | None = None,
+        uuid: str | None = None,
+        refund_amount: Decimal | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "application_id": application_id,
+            "uuid": uuid,
+            "covlir_status": covlir_status,
+            "refund_amount": str(refund_amount) if refund_amount is not None else None,
+        }
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__application_refund_result",
+                    json.dumps(payload),
+                    module_code="MYSPACE",
+                )
+            )
+        )
+
+    @staticmethod
+    def _json_result(raw: Any) -> dict[str, Any]:
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Unexpected installment refund function result.")
+        return raw
+
     async def list_for_reconcile(self, *, stale_minutes: int, limit: int) -> list[dict[str, Any]]:
         rows = await self.call_sp(
             "public.installment__applications_for_reconcile",
