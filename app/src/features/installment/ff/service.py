@@ -138,7 +138,9 @@ class FFService:
             provider_code="FF",
             products=products_payload,
         )
-        sync_response = SyncProductsResponse.model_validate(result)
+        # Each catalog row (program × term) is an online bank the CRM offers.
+        banks = await self.ff_repository.sync_online_banks(provider_code="FF")
+        sync_response = SyncProductsResponse.model_validate({**result, **banks})
         await self._log_event(
             "SYNC_PRODUCTS",
             source="INSTALLMENT",
@@ -150,6 +152,9 @@ class FFService:
                 "relinked": sync_response.relinked,
                 "orphaned_bank_ids": sync_response.orphaned_bank_ids,
                 "ids": sync_response.ids,
+                "banks_created": sync_response.banks_created,
+                "banks_updated": sync_response.banks_updated,
+                "banks_deactivated": sync_response.banks_deactivated,
             },
         )
         if sync_response.orphaned_bank_ids:

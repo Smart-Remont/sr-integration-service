@@ -77,6 +77,14 @@ class SyncProductsResponse(BaseSchema):
         description="Банки, чей продукт банк убрал: в рассрочке их не будет, пока не перепривязать",
     )
     ids: list[int]
+    banks_created: int = Field(default=0, description="Новых онлайн-банков (программа × срок)")
+    banks_updated: int = Field(
+        default=0, description="Онлайн-банков с обновлённым названием или лимитом"
+    )
+    banks_deactivated: int = Field(
+        default=0, description="Онлайн-банков выключено: банк убрал программу"
+    )
+    created_bank_ids: list[int] = Field(default_factory=list)
 
 
 class ProviderProductResponse(BaseSchema):

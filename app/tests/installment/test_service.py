@@ -686,3 +686,40 @@ async def test_apply_sends_reference_id_where_the_bank_reads_it():
     payload = svc.ff_client.apply_goods_loan_lead.await_args.kwargs["payload"]
     assert payload["reference_id"] == "101"
     assert payload["additional_information"]["reference_id"] == "101"
+
+
+@pytest.mark.asyncio
+async def test_sync_products_builds_online_banks_from_catalog():
+    svc = _service()
+    svc.ff_client.get_partner_info = AsyncMock(
+        return_value={
+            "partner_id": "SMART_REMONT",
+            "name": "ТОО SmartRemont",
+            "products": [
+                {
+                    "product_id": "SMARTREMONT_INST",
+                    "repayment_method": "INSTALLMENT",
+                    "repayment": [
+                        {"periods": [6, 12], "principal_limits": {"min": 5000, "max": 1500000}}
+                    ],
+                }
+            ],
+        }
+    )
+    svc.ff_repository.sync_provider_products = AsyncMock(
+        return_value={"inserted": 2, "closed": 0, "unchanged": 0, "ids": [1, 2]}
+    )
+    svc.ff_repository.sync_online_banks = AsyncMock(
+        return_value={
+            "banks_created": 2,
+            "banks_updated": 0,
+            "banks_deactivated": 0,
+            "created_bank_ids": [105, 106],
+        }
+    )
+
+    result = await svc.sync_products()
+
+    svc.ff_repository.sync_online_banks.assert_awaited_once_with(provider_code="FF")
+    assert result.banks_created == 2
+    assert result.created_bank_ids == [105, 106]

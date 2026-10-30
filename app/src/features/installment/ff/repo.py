@@ -504,6 +504,21 @@ class FFRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def sync_online_banks(self, *, provider_code: str) -> dict[str, Any]:
+        """One online bank_tab row per current catalog row (installment__online_banks_sync)."""
+        raw = scalar_from_sp_rows(
+            await self.call_sp(
+                "public.installment__online_banks_sync",
+                provider_code,
+                module_code="MYSPACE",
+            )
+        )
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Unexpected online banks sync result.")
+        return raw
+
     async def sync_provider_products(self, *, provider_code: str, products: list[dict]) -> dict:
         payload = {
             "provider_code": provider_code,
