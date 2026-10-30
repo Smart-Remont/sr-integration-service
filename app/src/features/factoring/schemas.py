@@ -8,6 +8,7 @@ from src.schema import BaseSchema
 
 from .openapi_examples import (
     APPLICATION_RESPONSE,
+    CANCEL_APPLICATION_REQUEST,
     CREATE_APPLICATION_REQUEST,
     CREATE_APPLICATION_RESPONSE,
     WEBHOOK_ACK_RESPONSE,
@@ -194,6 +195,21 @@ class FactoringProviderConfigResponse(BaseSchema):
     principal_max: Decimal
     prescoring_enabled: bool = Field(
         description="True when prescoring_base_url and FACTORING_PRESCORING_* env are set",
+    )
+
+
+class CancelFactoringApplicationRequest(BaseSchema):
+    model_config = ConfigDict(json_schema_extra={"examples": [CANCEL_APPLICATION_REQUEST]})
+
+    cancelled_by: int = Field(
+        description="employee_id. Из CRM берётся сотрудник из X-Integration-Context.",
+        examples=[42],
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Причина отмены, пишется в журнал событий.",
+        examples=["Клиент передумал"],
     )
 
 

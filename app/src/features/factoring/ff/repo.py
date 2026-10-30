@@ -250,6 +250,15 @@ class FactoringRepository(BaseRepository):
             )
         )
 
+    async def cancel_application(self, *, application_id: int, cancelled_by: int) -> None:
+        scalar_from_sp_rows(
+            await self.call_sp(
+                "public.factoring__application_cancel",
+                json.dumps({"application_id": application_id, "cancelled_by": cancelled_by}),
+                module_code="MYSPACE",
+            )
+        )
+
     async def update_application_prescoring(
         self,
         *,

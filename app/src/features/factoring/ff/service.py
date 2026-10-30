@@ -19,6 +19,7 @@ from src.exceptions import StoredProcedureError
 from src.shared.deal_guard import check_deal_client_request_state
 
 from ..schemas import (
+    CancelFactoringApplicationRequest,
     CessionApplicationItem,
     CessionBatchResult,
     CessionPreviewRequest,
@@ -66,11 +67,16 @@ from .templates import PRINT_FORM_SPECS, fetch_template_bytes
 
 VALID_WEBHOOK_STATUSES = {"REJECTED", "APPROVED", "ALTERNATIVE", "ISSUED", "PENDING", "IN_PROGRESS"}
 TERMINAL_WEBHOOK_STATUSES = {"ISSUED", "REJECTED", "REVERSED"}
+APPLICATION_STATUS_CANCELLED = "CANCELLED"
+# Отменить можно только заявку, которая ещё не ушла в банк (и нет uuid банка);
+# то же правило — в factoring__application_cancel (sql/factoring/35_cancel_before_bank.sql).
+CANCELLABLE_APPLICATION_STATUSES = {"NEW", "WAITING_SIGN"}
 # 1 сделка = 1 заявка на факторинг: новую заявку можно готовить только если
-# по сделке нет ни одной заявки, кроме REJECTED (отказ банка) или REVERSED
-# (полный возврат) — не только пока нет "активной" (см. factoring__application_create
-# в sql/factoring/27_one_application_per_deal.sql, тот же список статусов).
-RETRYABLE_APPLICATION_STATUSES = {"REJECTED", "REVERSED"}
+# по сделке нет ни одной заявки, кроме REJECTED (отказ банка), REVERSED
+# (полный возврат) или CANCELLED (отменена до банка) — не только пока нет "активной"
+# (см. factoring__application_create в sql/factoring/35_cancel_before_bank.sql,
+# тот же список статусов).
+RETRYABLE_APPLICATION_STATUSES = {"REJECTED", "REVERSED", APPLICATION_STATUS_CANCELLED}
 PRINT_FORMS_CACHE_DIR = Path(gettempdir()) / "factoring-print-forms"
 PRINT_FORM_PUBLIC_URL_TTL_SEC = 72 * 3600
 PRINT_FORM_CACHE_TTL_SEC = 15 * 60
@@ -224,7 +230,8 @@ class FactoringService:
                 detail=(
                     f"По сделке уже есть заявка на факторинг id={busy[0].id} "
                     f"(status={busy[0].status}). Новую можно оформить только после "
-                    "отказа банка (REJECTED) или полного возврата (REVERSED)."
+                    "отказа банка (REJECTED), полного возврата (REVERSED) или отмены "
+                    "заявки до отправки в банк (CANCELLED)."
                 ),
             )
         credit_contract = self._generate_credit_contract(
@@ -637,6 +644,53 @@ class FactoringService:
             redirect_url=redirect_url,
             provider_code=PROVIDER_CODE,
         )
+
+    async def cancel_application(
+        self,
+        application_id: int,
+        request: CancelFactoringApplicationRequest,
+    ) -> FactoringApplicationResponse:
+        """Отмена до отправки в банк: заявка в NEW / WAITING_SIGN больше не держит
+        сделку. MyNCA не вызываем: открытый процесс подписи статус заявки не
+        меняет, а submit отменённую заявку не примет."""
+        application = await self.get_application_by_id(application_id)
+        conflict = self._cancel_conflict(application)
+        if conflict:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict)
+        try:
+            await self.repository.cancel_application(
+                application_id=application_id, cancelled_by=request.cancelled_by
+            )
+        except StoredProcedureError as exc:
+            # Та же проверка в БД под блокировкой строки: статус мог смениться
+            # между чтением выше и отменой.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        await self._log_event(
+            "CANCELLED",
+            factoring_id=application_id,
+            source="FACTORING",
+            committed=True,
+            payload={
+                "cancelled_by": request.cancelled_by,
+                "reason": (request.reason or "").strip() or None,
+                "previous_status": application.status,
+            },
+        )
+        return await self.get_application_for_client(application_id)
+
+    @staticmethod
+    def _cancel_conflict(application: FactoringApplicationResponse) -> str | None:
+        if application.uuid:
+            return "Заявка уже отправлена в банк — отменить нельзя"
+        current = (application.status or "").upper()
+        if current == APPLICATION_STATUS_CANCELLED:
+            return "Заявка уже отменена"
+        if current not in CANCELLABLE_APPLICATION_STATUSES:
+            return (
+                f"Заявку в статусе {application.status} отменить нельзя: "
+                "отменяется только заявка до отправки в банк"
+            )
+        return None
 
     async def get_print_form_file(
         self,
