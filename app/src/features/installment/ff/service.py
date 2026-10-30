@@ -1131,6 +1131,10 @@ class FFService:
                 "is_knox": False,
             },
             "additional_information": {
+                # The bank stores the order number from here
+                # (credits_universaladditionalinformation.reference_id); the
+                # top-level one comes back as null in goods-application-info.
+                "reference_id": reference_id,
                 "hook_url": self._required_config_value(provider, "hook_url"),
                 "failure_url": self._required_config_value(provider, "failure_url"),
                 "success_url": self._required_config_value(provider, "success_url"),

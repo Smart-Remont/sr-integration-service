@@ -674,3 +674,15 @@ def test_refund_error_description_is_readable():
     with pytest.raises(FFClientError) as exc_info:
         FFClient._parse_response(response)
     assert exc_info.value.detail == "Поле 'refund_type' не может быть пустым"
+
+
+@pytest.mark.asyncio
+async def test_apply_sends_reference_id_where_the_bank_reads_it():
+    svc = _service()
+    svc.ff_client.apply_goods_loan_lead = AsyncMock(return_value={"uuid": "u-1"})
+
+    await svc.create_application(_request())
+
+    payload = svc.ff_client.apply_goods_loan_lead.await_args.kwargs["payload"]
+    assert payload["reference_id"] == "101"
+    assert payload["additional_information"]["reference_id"] == "101"
