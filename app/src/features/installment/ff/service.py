@@ -278,7 +278,7 @@ class FFService:
                 detail=APPLY_UNKNOWN_DETAIL,
             )
 
-        redirect_url_value = response_payload.get("url")
+        redirect_url_value = response_payload.get("redirect_url") or response_payload.get("url")
         redirect_url = redirect_url_value if isinstance(redirect_url_value, str) else None
 
         await self.ff_repository.committed(
