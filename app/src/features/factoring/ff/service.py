@@ -219,7 +219,13 @@ class FactoringService:
         hook_url = self._required_config_value(provider, "hook_url")
         success_url = self._required_config_value(provider, "success_url")
         failure_url = self._required_config_value(provider, "failure_url")
-        branch_code = (request.branch_code or "200000").strip()
+        branch_code = await self._resolve_branch_code(
+            provider,
+            iin=iin,
+            phone=phone,
+            requested=request.branch_code,
+            client_request_id=request.client_request_id,
+        )
         existing = await self.repository.get_applications_by_client_request(
             request.client_request_id
         )
@@ -314,6 +320,7 @@ class FactoringService:
         return PrepareFactoringDocumentsResponse(
             id=application_id,
             credit_contract=credit_contract,
+            branch_code=branch_code,
             status="WAITING_SIGN",
             provider_code=PROVIDER_CODE,
             documents=documents,
@@ -1801,6 +1808,86 @@ class FactoringService:
                         access_token=access_token,
                         payload=payload,
                         apply_path=apply_path,
+                        **self._request_kwargs(provider),
+                    )
+                except FactoringClientError as retry_exc:
+                    raise self._map_client_error(retry_exc) from retry_exc
+            raise self._map_client_error(exc) from exc
+
+    async def _resolve_branch_code(
+        self,
+        provider: FactoringProvider,
+        *,
+        iin: str,
+        phone: str,
+        requested: str | None,
+        client_request_id: int,
+    ) -> str:
+        """Филиал клиента в Colvir (branch-code-info) для номера договора.
+
+        Не ответил или ответил не кодом — заявку не блокируем: остаётся филиал
+        из CRM (по городу сделки или выбранный менеджером), в журнале причина."""
+        fallback = (requested or "200000").strip()
+        try:
+            response = await self._branch_code_with_reauth(provider, iin=iin, phone=phone)
+            bank_code = response.get("branchCode")
+            bank_code = bank_code.strip() if isinstance(bank_code, str) else ""
+            if not bank_code.isdigit():
+                raise ValueError(f"Unexpected branchCode in the bank answer: {bank_code!r}")
+        except (HTTPException, ValueError) as exc:
+            await self._log_event(
+                "BRANCH_CODE_FALLBACK",
+                source="FF_FACTORING",
+                committed=True,
+                payload={
+                    "client_request_id": client_request_id,
+                    "branch_code": fallback,
+                    "error": self._extract_error_message(exc)
+                    if isinstance(exc, HTTPException)
+                    else str(exc),
+                },
+            )
+            return fallback
+        await self._log_event(
+            "BRANCH_CODE_RESOLVED",
+            source="FF_FACTORING",
+            committed=True,
+            payload={
+                "client_request_id": client_request_id,
+                "branch_code": bank_code,
+                "requested": fallback,
+            },
+        )
+        return bank_code
+
+    async def _branch_code_with_reauth(
+        self,
+        provider: FactoringProvider,
+        *,
+        iin: str,
+        phone: str,
+    ) -> dict[str, Any]:
+        access_token = await self._ensure_valid_token(provider)
+        branch_code_path = provider.config.get("branch_code_path")
+        if not isinstance(branch_code_path, str) or not branch_code_path.strip():
+            branch_code_path = "/ffc-api-public/custom/branch-code-info"
+        try:
+            return await self.client.get_branch_code(
+                access_token=access_token,
+                iin=iin,
+                phone=phone,
+                branch_code_path=branch_code_path,
+                **self._request_kwargs(provider),
+            )
+        except FactoringClientError as exc:
+            if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+                access_token = await self._authenticate_and_store_token(provider)
+                try:
+                    return await self.client.get_branch_code(
+                        access_token=access_token,
+                        iin=iin,
+                        phone=phone,
+                        branch_code_path=branch_code_path,
                         **self._request_kwargs(provider),
                     )
                 except FactoringClientError as retry_exc:

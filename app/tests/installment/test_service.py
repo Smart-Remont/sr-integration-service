@@ -119,7 +119,7 @@ def _events(svc: FFService) -> list[str]:
 async def test_create_stores_borrower_and_returns_local_qr():
     svc = _service()
     svc.ff_client.apply_goods_loan_lead = AsyncMock(
-        return_value={"uuid": "u-1", "url": "https://bank.example/goods-loan?uuid=u-1"}
+        return_value={"uuid": "u-1", "redirect_url": "https://bank.example/goods-loan?uuid=u-1"}
     )
 
     result = await svc.create_application(_request())
@@ -128,7 +128,22 @@ async def test_create_stores_borrower_and_returns_local_qr():
     assert kwargs["iin"] == "891026301046"
     assert kwargs["mobile_phone"] == "+77066078118"
     assert result.uuid == "u-1"
+    assert result.redirect_url == "https://bank.example/goods-loan?uuid=u-1"
     assert result.redirect_qr and result.redirect_qr.startswith("data:image/svg+xml")
+    saved = svc.ff_repository.update_application_after_apply.await_args.kwargs
+    assert saved["redirect_url"] == "https://bank.example/goods-loan?uuid=u-1"
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_reading_the_old_url_field():
+    svc = _service()
+    svc.ff_client.apply_goods_loan_lead = AsyncMock(
+        return_value={"uuid": "u-1", "url": "https://bank.example/goods-loan?uuid=u-1"}
+    )
+
+    result = await svc.create_application(_request())
+
+    assert result.redirect_url == "https://bank.example/goods-loan?uuid=u-1"
 
 
 @pytest.mark.asyncio
