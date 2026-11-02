@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Request, Response
 
 from src.shared.php_json import php_json_decode
+from src.shared.zend_request import php_route
 
 from ..openapi_examples import REQUEST_CONSTRUCTIVES_RESPONSES, json_body
-from ..php_contract import PhpBasicAuthDep, method_not_allowed, php_route
+from ..php_contract import PhpBasicAuthDep, method_not_allowed
 from .deps import RequestConstructivesServiceDep
 
 router = APIRouter()

@@ -8,6 +8,8 @@ DESCRIPTION = (
     "| Внутренний REST | `/api/v1/...` | Basic, для прокси CRM ещё JWT `X-Integration-Context` "
     "| Pydantic-схемы, обычные HTTP-коды |\n"
     "| BIG Integration | `/api/big_integration/...` | Basic | конверт `{data, response, error}` |\n"
+    "| Kaspi (перенос из PHP) | `/api/kaspi/...` | заголовок от nginx, адреса Kaspi в nginx "
+    "| XML как в PHP |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
 )
 
@@ -35,6 +37,15 @@ TAGS = [
             "функции БД — HTTP 500 и `error.message`. Контракт заморожен: "
             "`app/tests/big_integration/`. Маршруты, перенесённые из PHP позже, отдают numeric и "
             "даты текстом, как PHP."
+        ),
+    },
+    {
+        "name": "Kaspi",
+        "description": (
+            "Оплата заявок через Kaspi, перенос из PHP `ClientController`. Ответ совпадает с PHP побайтно, "
+            "включая ошибки в XML с кодом 200. Kaspi запросы не подписывает: маршрут "
+            "доступен только через nginx: там список адресов Kaspi и заголовок "
+            "`X-Kaspi-Proxy-Secret`."
         ),
     },
     {

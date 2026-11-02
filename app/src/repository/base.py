@@ -12,6 +12,7 @@ type SpRow = dict[str, object]
 type SpRows = list[SpRow]
 
 _FUNCTION_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
+_CAST_TYPE_RE = re.compile(r"^[a-z][a-z ]*$")
 
 
 def scalar_from_sp_rows(rows: SpRows) -> object | None:
@@ -19,6 +20,12 @@ def scalar_from_sp_rows(rows: SpRows) -> object | None:
     if not rows:
         return None
     return next(iter(rows[0].values()))
+
+
+def _valid_cast_type(cast: str) -> str:
+    if not _CAST_TYPE_RE.fullmatch(cast):
+        raise ValueError(f"Invalid cast type: {cast}")
+    return cast
 
 
 class BaseRepository:
@@ -55,18 +62,22 @@ class BaseRepository:
         cursor: bool = False,
         session_user_id: int | None = None,
         module_code: str = "MYSPACE",
+        text_casts: Sequence[str | None] = (),
     ) -> SpRows:
         """
         Call a PostgreSQL stored function.
 
         - Pass arguments directly: call_sp("public.fn", id)
         - A function that opens a refcursor as its first argument: cursor=True
+        - Strings the server must convert itself, with its own error text, as PHP sent them:
+          text_casts=("integer", None), one type per argument, None for no conversion
         """
         self._validate_function_name(method)
 
         cursor_name = f"cur_{uuid.uuid4().hex[:8]}" if cursor else None
         bound_args = [cursor_name, *args] if cursor_name else list(args)
-        query = self._build_select_function_sql(method, len(bound_args))
+        casts = [None, *text_casts] if cursor_name else list(text_casts)
+        query = self._build_select_function_sql(method, len(bound_args), casts)
 
         with map_asyncpg_errors():
             await self._set_db_session(session_user_id, module_code)
@@ -101,10 +112,18 @@ class BaseRepository:
         return self._rows_to_dicts(rows)
 
     @staticmethod
-    def _build_select_function_sql(method: str, args_count: int) -> str:
+    def _build_select_function_sql(
+        method: str,
+        args_count: int,
+        casts: Sequence[str | None] = (),
+    ) -> str:
         if args_count == 0:
             return f"select {method}()"
-        placeholders = ", ".join(f"${index}" for index in range(1, args_count + 1))
+        all_casts = [*casts, *[None] * (args_count - len(casts))]
+        placeholders = ", ".join(
+            f"${index}" if cast is None else f"${index}::text::{_valid_cast_type(cast)}"
+            for index, cast in enumerate(all_casts, start=1)
+        )
         return f"select {method}({placeholders})"
 
     @staticmethod

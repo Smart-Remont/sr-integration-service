@@ -2,7 +2,7 @@
 
 Единственный файл с правилами репозитория для людей и ИИ-агентов. [AGENTS.md](AGENTS.md) ссылается сюда, [README.md](README.md) — только запуск.
 
-Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: Freedom Finance (рассрочка и факторинг), MyNCA (подписи), BIG Integration (API ДДУ для BI Group), загрузка файлов в MinIO, распознавание квартирных листов BI (`kl_recognition`: Composer через Cursor SDK, помощник на Node в `composer_sdk/`, без БД). Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
+Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: Freedom Finance (рассрочка и факторинг), MyNCA (подписи), BIG Integration (API ДДУ для BI Group), Kaspi (оплата заявок, перенос из PHP), загрузка файлов в MinIO, распознавание квартирных листов BI (`kl_recognition`: Composer через Cursor SDK, помощник на Node в `composer_sdk/`, без БД). Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
 
 Общие правила Smart Remont (базы, SQL, ветки других репо, агенты) — `../myspace/CLAUDE.md`. Агент для этого репо — `smart-remont:integrations-dev`. Состояние и выкатка Freedom — `../myspace/features/freedom-factoring/STATUS.md` и `../myspace/sql/freedom-factoring/PROD_APPLY_TODO.md`. Локальные папки `sql/`, `agent-memory/`, `docs/` в `.gitignore`: это ссылки на `../myspace/sql/` и `../myspace/features/`, новые файлы кладутся туда.
 
@@ -21,7 +21,7 @@ nginx `office.smartremont.kz` (PHP) отправляет сюда только �
 
 Не меняются: HTTP-коды, ключи конверта `{data, response, error}`, тексты ошибок, типы значений (`Decimal` → число, дата → ISO-строка). Всё это закреплено в `app/tests/big_integration/test_contract.py` и `app/tests/test_app.py`; эти тесты проходят и на коде `main`. Упавший тест здесь означает поломку у BI Group, а не повод поправить тест. Новый маршрут BIG добавляется отдельной папкой и не меняет общие `responses.py`, `http.py`, `errors.py`.
 
-Маршруты, перенесённые из PHP позже, ещё не заведены в nginx; список и порядок — `../myspace/features/legacy-integrations/STATUS.md`. Они отдают значения как PHP (`src/shared/php_json.py`: numeric и даты текстом), а ошибки поднимают исключением (`features/big_integration/php_contract.py`), чтобы транзакция откатилась. Новые маршруты, переносимые из PHP, строятся так же.
+Маршруты, перенесённые из PHP позже, ещё не заведены в nginx; список и порядок — `../myspace/features/legacy-integrations/STATUS.md`. Они отдают значения как PHP (`src/shared/php_json.py`: numeric и даты текстом), а ошибки поднимают исключением (`features/big_integration/php_contract.py`), чтобы транзакция откатилась. Новые маршруты, переносимые из PHP, строятся так же, общий код — `src/shared/` (`zend_request.py`, `php_db_errors.py`, `php_xml.py`).
 
 ## Ветки
 
@@ -138,6 +138,10 @@ app/
 - `GET /health` — процесс жив; `GET /health/ready` — есть связь с PostgreSQL.
 - Пул БД: `DB_POOL_MAX_SIZE` на каждый воркер gunicorn, всего соединений = `GUNICORN_WORKERS × DB_POOL_MAX_SIZE`.
 
+### Крон
+
+Расписание живёт в `/etc/crontab` на сервере office: строки `psql < /smartremont/cront_scripts/cronrun__*.sql` запускают функции БД `cronrun__every_10_minutes`, `cronrun__every_2_hours` и т.д., планировщика в самой базе нет. Лог — `cron_log_tab`. Ручку сервиса из крона вызывает функция БД через расширение `http`.
+
 ## Технический долг
 
 Не копировать эти приёмы в новый код; закрывать по мере работы с файлом.
@@ -148,3 +152,5 @@ app/
 4. Вызовы банка и MyNCA идут внутри транзакции запроса и держат соединение пула всё время ответа партнёра.
 5. Маршруты BIG возвращают ответ с ошибкой вместо исключения (см. «Данные и транзакции»). Контракт заморожен, поэтому оставлено; в новых маршрутах так не делать.
 6. Конфиг — классы с `os.getenv` при импорте; при росте числа интеграций перейти на `pydantic-settings` с проверкой обязательных значений при старте.
+7. **Kaspi без подписи отправителя.** Kaspi запросы не подписывает, в PHP была только заглушка с IP, которая всегда проходит. Список адресов Kaspi держит nginx и ставит заголовок `X-Kaspi-Proxy-Secret`, сервис сверяет его с `KASPI_PROXY_SECRET`: нет настройки — 503, нет заголовка или он неверный — 403. `X-Forwarded-For` сервис не верит. Без этой настройки nginx `kaspi-request-pay` не включать: `pay` записывает оплату.
+8. **Ошибка, пойманная после записи: `KaspiService._survive_failure`** (`features/kaspi/service.py`). Обычно так нельзя (см. «Данные и транзакции»), здесь это верно. Шаг идёт в точке сохранения, поэтому его сбой откатывает только сам шаг, а оплата остаётся целой. Так повторено поведение PHP: `execSP` и `getSP` возвращают ошибку значением, а `kaspiRequestPayAction` не смотрит на результат `after_payment_operations` и `insert_kaspi_pay_log` и подставляет пустые значения вместо `kaspi_request_get_info`. Ответ с отказом после этого шага был бы неправдой: деньги Kaspi уже приняты. Сбой пишется в лог приложения.

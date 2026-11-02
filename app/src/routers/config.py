@@ -10,10 +10,15 @@ class APIBigIntegrationPrefixConfig:
     prefix: str = "/big_integration"
 
 
+class APIKaspiPrefixConfig:
+    prefix: str = "/kaspi"
+
+
 class APIPrefixConfig:
     prefix: str = "/api"
     v1: APIV1PrefixConfig = APIV1PrefixConfig()
     big_integration: APIBigIntegrationPrefixConfig = APIBigIntegrationPrefixConfig()
+    kaspi: APIKaspiPrefixConfig = APIKaspiPrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

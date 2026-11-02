@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Request, Response
 
+from src.shared.zend_request import php_route
+
 from ..openapi_examples import BIG_NOTIFY_CLIENT_RESPONSES, json_body
-from ..php_contract import PhpBasicAuthDep, php_route
+from ..php_contract import PhpBasicAuthDep
 from .deps import BigNotifyClientServiceDep
 from .service import BigNotifyClientError
 

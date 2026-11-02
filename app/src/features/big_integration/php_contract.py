@@ -4,15 +4,15 @@ Errors here are exceptions, so the request transaction rolls back (see "Данн
 in CLAUDE.md); the handlers turn them into the response PHP gave.
 """
 
-from collections.abc import Callable
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.security import HTTPBasic
 from loguru import logger
 
 from src.config import big_integration_auth_config
 from src.security import verify_basic_credentials
+from src.shared.php_db_errors import is_php_unhandled_error
 from src.shared.php_json import php_json_encode
 
 from .errors import BigIntegrationDatabaseError
@@ -20,8 +20,6 @@ from .errors import BigIntegrationDatabaseError
 _CONTENT_TYPE = "application/json"
 _CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate, max-age=0"}
 _METHOD_NOT_ALLOWED = "Неподдерживаемый метод"
-_FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
-_ALL_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _http_basic = HTTPBasic(auto_error=False)
 
 
@@ -72,7 +70,10 @@ def register_big_integration_handlers(app: FastAPI) -> None:
         return exc.to_response()
 
     async def database_error(request: Request, exc: BigIntegrationDatabaseError) -> Response:
-        logger.error(
+        # A function refusing on purpose is an ordinary answer, only a real failure is an error.
+        level = "ERROR" if is_php_unhandled_error(exc.message) else "INFO"
+        logger.log(
+            level,
             "BIG route {path}: database error: {error}",
             path=request.url.path,
             error=exc.message,
@@ -116,60 +117,6 @@ PhpBasicAuthDep = Annotated[None, Depends(_require_php_basic_auth)]
 
 async def method_not_allowed(_: PhpBasicAuthDep) -> Response:
     return php_error_response(_METHOD_NOT_ALLOWED, status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-def php_route(
-    router: APIRouter,
-    path: str,
-    *,
-    method: str,
-    other_methods: Callable[..., Any] | None = None,
-    **docs: Any,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register a route the way the Zend router served it.
-
-    Scalar shows ``method`` on ``path``. As in PHP, the address also works with a trailing slash
-    and ``/key/value`` pairs, and other HTTP methods reach ``other_methods`` (the same endpoint
-    when PHP did not check the method).
-    """
-
-    def register(endpoint: Callable[..., Any]) -> Callable[..., Any]:
-        with_tail = f"{path}/{{tail:path}}"
-        others = [item for item in _ALL_METHODS if item != method]
-        router.add_api_route(path, endpoint, methods=[method], **docs)
-        router.add_api_route(with_tail, endpoint, methods=[method], include_in_schema=False)
-        for route_path in (path, with_tail):
-            router.add_api_route(
-                route_path,
-                other_methods or endpoint,
-                methods=others,
-                include_in_schema=False,
-            )
-        return endpoint
-
-    return register
-
-
-async def read_param(request: Request, name: str) -> str:
-    """``_getParam``: ``/key/value`` pairs of the address, the query string, then the POST form."""
-    value = _address_pairs(request).get(name)
-    if value is None:
-        value = request.query_params.get(name)
-    if value is None and request.method == "POST":
-        value = await _form_value(request, name)
-    return value or ""
-
-
-def _address_pairs(request: Request) -> dict[str, str]:
-    parts = str(request.path_params.get("tail", "")).split("/")
-    return dict(zip(parts[::2], parts[1::2], strict=False))
-
-
-async def _form_value(request: Request, name: str) -> str | None:
-    if not request.headers.get("content-type", "").startswith(_FORM_CONTENT_TYPES):
-        return None
-    value = (await request.form()).get(name)
-    return value if isinstance(value, str) else None
 
 
 def zero_to_null(value: str) -> str | None:

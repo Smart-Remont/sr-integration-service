@@ -10,6 +10,7 @@ from src.config import app_config, cors_config
 from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
 from src.features.big_integration.php_contract import register_big_integration_handlers
+from src.features.kaspi.errors import register_kaspi_handlers
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
 
@@ -34,6 +35,7 @@ app = FastAPI(
 )
 register_infrastructure_handlers(app)
 register_big_integration_handlers(app)
+register_kaspi_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_config.allow_origins,

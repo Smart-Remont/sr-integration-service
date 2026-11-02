@@ -18,3 +18,10 @@ DatabaseConnectionDep = Annotated[
     Connection,
     Depends(get_db_connection),
 ]
+
+# The exit code of a default dependency runs after the response is sent, so a failed COMMIT stays
+# unseen by the caller. Here the commit comes first: "paid" never goes out for a lost payment.
+CommitBeforeResponseConnectionDep = Annotated[
+    Connection,
+    Depends(get_db_connection, scope="function"),
+]

@@ -2,12 +2,14 @@
 
 from fastapi import APIRouter, Request, Response
 
+from src.shared.zend_request import php_route, read_param
+
 from ..openapi_examples import (
     DDU_REQUEST_INFO_RESPONSES,
     REQUEST_INFO_RESPONSES,
     query_parameters,
 )
-from ..php_contract import PhpBasicAuthDep, php_route, read_param
+from ..php_contract import PhpBasicAuthDep
 from .deps import DduLookupServiceDep
 
 router = APIRouter()

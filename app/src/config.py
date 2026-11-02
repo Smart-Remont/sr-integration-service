@@ -31,6 +31,12 @@ class BigIntegrationAuthConfig:
     password: str = os.getenv("INTEGRATION_HS_BI_PASSWORD", "")
 
 
+class KaspiProxyConfig:
+    """Shared with nginx, which alone may reach the Kaspi route. Empty secret: 503."""
+
+    secret: str = os.getenv("KASPI_PROXY_SECRET", "")
+
+
 class InstallmentAuthConfig:
     username: str = os.getenv("INSTALLMENT_API_USER", "")
     password: str = os.getenv("INSTALLMENT_API_PASSWORD", "")
@@ -174,6 +180,7 @@ class KlRecognitionConfig:
 
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
+kaspi_proxy_config = KaspiProxyConfig()
 installment_auth_config = InstallmentAuthConfig()
 integration_context_config = IntegrationContextConfig()
 factoring_auth_config = FactoringAuthConfig()
