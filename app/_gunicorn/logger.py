@@ -8,14 +8,17 @@ LOG_DEFAULT_FORMAT = (
 )
 
 _CALLBACK_KEY = re.compile(r"(/callback/key/)[^\s/?\"]+")
+# Everything after the address goes: Zend finds the token in the query and in /key/value pairs,
+# under an escaped name too, and the last of several values is the one that counts.
+_ALBATO_TOKEN = re.compile(r"(/albato-meta-lead)[^\s\"]+")
 
 
 class SecretPathFilter(Filter):
-    """The key of a MyNCA callback is in its address and must not reach the access log."""
+    """Keys in addresses (a MyNCA callback, the Albato token) must not reach the access log."""
 
     def filter(self, record: LogRecord) -> bool:
         message = record.getMessage()
-        masked = _CALLBACK_KEY.sub(r"\1***", message)
+        masked = _ALBATO_TOKEN.sub(r"\1***", _CALLBACK_KEY.sub(r"\1***", message))
         if masked != message:
             record.msg = masked
             record.args = ()

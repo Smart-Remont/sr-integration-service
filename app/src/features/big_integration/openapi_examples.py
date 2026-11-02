@@ -102,3 +102,47 @@ BIG_NOTIFY_CLIENT_RESPONSES = {
         },
     },
 }
+
+
+def _response_json_responses(data: object) -> dict[int | str, dict[str, object]]:
+    return {
+        200: {
+            "description": "Успех",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "data": data,
+                        "response": True,
+                        "error": {"code": 0, "message": ""},
+                    },
+                },
+            },
+        },
+        400: {
+            "description": "Ошибка функции БД или метод не POST",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "data": "P400",
+                        "response": False,
+                        "error": {"code": 400, "message": "ФИО не может быть пустым"},
+                    },
+                },
+            },
+        },
+    }
+
+
+REQUEST_FORM_RESPONSES = _response_json_responses(0)
+GET_CONSTRUCTIVES_RESPONSES = _response_json_responses(
+    {
+        "application_id": 3219655,
+        "material_list": [
+            {
+                "material_name": "Материал / Материал",
+                "section": "Бөлім/Раздел",
+                "room_name": "Бөлме/Комната",
+            },
+        ],
+    },
+)

@@ -11,7 +11,7 @@ from fastapi.security import HTTPBasic
 from loguru import logger
 
 from src.config import big_integration_auth_config
-from src.php_compat.json_codec import php_json_encode
+from src.php_compat.json_codec import php_json_encode, php_json_encode_pretty
 from src.php_compat.pdo_errors import is_php_unhandled_error
 from src.php_compat.responses import PHP_HTML_CONTENT_TYPE
 from src.security import verify_basic_credentials
@@ -22,6 +22,13 @@ _CONTENT_TYPE = "application/json"
 _CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate, max-age=0"}
 _METHOD_NOT_ALLOWED = "Неподдерживаемый метод"
 _http_basic = HTTPBasic(auto_error=False)
+
+
+# As in ``_getBiErrorCode``, where P003 is missing from the list: it gives P400 too.
+_PARTNER_ERROR_CODES = frozenset(
+    f"P{number:03}" for number in (1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+)
+_OTHER_ERROR_CODE = "P400"
 
 
 class BigIntegrationRequestError(Exception):
@@ -37,6 +44,32 @@ class BigIntegrationRequestError(Exception):
 
     def to_response(self) -> Response:
         return php_error_response(self.message, status_code=self.status_code)
+
+
+class PhpResponseJsonError(BigIntegrationRequestError):
+    """PHP ``response_json`` on an error: code 400, ``error.code``, pretty JSON."""
+
+    def __init__(self, message: str, *, data: object | None = None) -> None:
+        super().__init__(message)
+        # An empty object when not passed: PHP filled ``data`` with ``new stdClass()`` beforehand.
+        self.data = {} if data is None else data
+
+    def to_response(self) -> Response:
+        envelope = {
+            "data": self.data,
+            "response": False,
+            "error": {"code": status.HTTP_400_BAD_REQUEST, "message": self.message},
+        }
+        return php_response(
+            php_json_encode_pretty(envelope),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+def php_bi_error_code(message: str) -> str:
+    """``_getBiErrorCode``: the code a function raised at the start of its text, or P400."""
+    code = message[:4]
+    return code if code in _PARTNER_ERROR_CODES else _OTHER_ERROR_CODE
 
 
 class BigIntegrationUnauthorizedError(Exception):
@@ -55,6 +88,12 @@ def php_response(content: bytes, *, status_code: int = status.HTTP_200_OK) -> Re
 def php_success_response(data: object) -> Response:
     envelope = {"data": data, "response": True, "error": {"message": ""}}
     return php_response(php_json_encode(envelope))
+
+
+def php_response_json_success(data: object) -> Response:
+    """PHP ``response_json`` on a success."""
+    envelope = {"data": data, "response": True, "error": {"code": 0, "message": ""}}
+    return php_response(php_json_encode_pretty(envelope))
 
 
 def php_error_response(
@@ -119,3 +158,8 @@ PhpBasicAuthDep = Annotated[None, Depends(_require_php_basic_auth)]
 
 async def method_not_allowed(_: PhpBasicAuthDep) -> Response:
     return php_error_response(_METHOD_NOT_ALLOWED, status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+async def response_json_method_not_allowed(_: PhpBasicAuthDep) -> Response:
+    """PHP ``response_json`` routes do not answer 405: a method other than POST is a 400 error."""
+    raise PhpResponseJsonError(_METHOD_NOT_ALLOWED)

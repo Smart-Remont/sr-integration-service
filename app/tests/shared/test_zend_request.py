@@ -1,6 +1,7 @@
+import pytest
 from fastapi import Request
 
-from src.php_compat.zend_request import read_param, read_params
+from src.php_compat.zend_request import php_raw_body, read_param, read_params
 
 
 def _request(query: bytes, *, path: str = "/route", tail: str | None = None) -> Request:
@@ -16,7 +17,11 @@ def _request(query: bytes, *, path: str = "/route", tail: str | None = None) -> 
     return Request(scope)
 
 
-def _post_request(body: bytes) -> Request:
+def _post_request(
+    body: bytes,
+    *,
+    content_type: bytes = b"application/x-www-form-urlencoded",
+) -> Request:
     async def receive() -> dict[str, object]:
         return {"type": "http.request", "body": body, "more_body": False}
 
@@ -25,8 +30,9 @@ def _post_request(body: bytes) -> Request:
         "method": "POST",
         "path": "/route",
         "query_string": b"",
-        "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        "headers": [(b"content-type", content_type)],
         "path_params": {},
+        "app": None,
     }
     return Request(scope, receive)
 
@@ -68,23 +74,23 @@ async def test_repeated_address_key_becomes_an_array() -> None:
     assert params.address == {"a": {"0": "1", "1": "2"}}
 
 
-async def test_query_keeps_the_first_1000_variables_not_counting_empty_ones() -> None:
-    query = b"&&" + b"&".join(b"k%d=1" % index for index in range(1001))
+async def test_query_keeps_the_first_100000_variables_not_counting_empty_ones() -> None:
+    query = b"&&" + b"&".join(b"k%d=1" % index for index in range(100001))
 
     params = await read_params(_request(query))
 
-    assert len(params.query) == 1000
-    assert "k999" in params.query
-    assert "k1000" not in params.query
+    assert len(params.query) == 100000
+    assert "k99999" in params.query
+    assert "k100000" not in params.query
 
 
 async def test_form_keeps_one_variable_more_and_counts_empty_ones() -> None:
-    body = b"&".join(b"k%d=1" % index for index in range(1002))
-    assert len((await read_params(_post_request(body))).form) == 1001
+    body = b"&".join(b"k%d=1" % index for index in range(100002))
+    assert len((await read_params(_post_request(body))).form) == 100001
 
     params = await read_params(_post_request(b"&&" + body))
 
-    assert len(params.form) == 999
+    assert len(params.form) == 99999
 
 
 async def test_array_index_follows_the_largest_number() -> None:
@@ -108,3 +114,48 @@ async def test_long_repeated_address_key_is_built_in_place() -> None:
     array = params.address["a"]
     assert len(array) == 20000
     assert array["19999"] == "1"
+
+
+async def test_raw_body_is_empty_for_a_multipart_request_and_the_form_still_reads() -> None:
+    body = b'--b\r\nContent-Disposition: form-data; name="a"\r\n\r\n1\r\n--b--\r\n'
+    request = _post_request(body, content_type=b"multipart/form-data; boundary=b")
+
+    assert await php_raw_body(request) == b""
+    assert (await read_params(request)).form == {"a": "1"}
+
+
+async def test_multipart_without_a_boundary_keeps_the_raw_body_and_has_no_form() -> None:
+    request = _post_request(b"{}", content_type=b"multipart/form-data")
+
+    assert await php_raw_body(request) == b"{}"
+    assert (await read_params(request)).form == {}
+
+
+@pytest.mark.parametrize("body", [b"x", b"not a form", b"--b\r\nno headers"])
+async def test_broken_multipart_is_an_empty_form(body: bytes) -> None:
+    request = _post_request(body, content_type=b"multipart/form-data; boundary=b")
+
+    assert await php_raw_body(request) == b""
+    assert (await read_params(request)).form == {}
+
+
+async def test_broken_multipart_can_be_read_again_without_the_raw_body_first() -> None:
+    request = _post_request(b"not a form", content_type=b"multipart/form-data; boundary=b")
+
+    assert (await read_params(request)).form == {}
+    assert (await read_params(request)).form == {}
+
+
+async def test_multipart_is_not_lost_over_the_limits_of_starlette() -> None:
+    parts = b"".join(
+        b'--b\r\nContent-Disposition: form-data; name="k%d"\r\n\r\n1\r\n' % index
+        for index in range(1100)
+    )
+    long_part = b'--b\r\nContent-Disposition: form-data; name="long"\r\n\r\n'
+    body = parts + long_part + b"x" * (2 * 1024 * 1024) + b"\r\n--b--\r\n"
+    request = _post_request(body, content_type=b"multipart/form-data; boundary=b")
+
+    form = (await read_params(request)).form
+
+    assert len(form) == 1101
+    assert len(form["long"]) == 2 * 1024 * 1024

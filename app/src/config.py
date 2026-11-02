@@ -57,6 +57,19 @@ class AutoSignCronAuthConfig:
     password: str = os.getenv("AUTO_SIGN_CRON_PASSWORD", "")
 
 
+class ShowroomCronAuthConfig:
+    """Basic auth of the crontab wget line for /api/showroom/*. Empty: 503."""
+
+    username: str = os.getenv("SHOWROOM_CRON_USER", "")
+    password: str = os.getenv("SHOWROOM_CRON_PASSWORD", "")
+
+
+class ShowroomConfig:
+    """Where the list of showrooms goes. Taken as it is: the slash at its end is part of the address."""
+
+    bi_url: str = os.getenv("SHOWROOM_BI_URL", "").strip()
+
+
 class AutoSignConfig:
     """Crons of company signing. Empty by default, so a stand without them signs nothing: 503.
 
@@ -274,6 +287,8 @@ big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
 sms_cron_auth_config = SmsCronAuthConfig()
 auto_sign_cron_auth_config = AutoSignCronAuthConfig()
+showroom_cron_auth_config = ShowroomCronAuthConfig()
+showroom_config = ShowroomConfig()
 auto_sign_config = AutoSignConfig()
 kcell_config = KcellConfig()
 client_sign_config = ClientSignConfig.from_env()

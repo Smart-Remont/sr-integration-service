@@ -9,6 +9,8 @@ _ENTITY = re.compile(r"&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);")
 _NUMERIC_PREFIX = re.compile(r"[ \t\n\r\v\f]*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
 _TAG_NAME = re.compile(r"</?([^\s/>]*)")
 _MAX_CODE_POINT = 0x10FFFF
+_FLOAT_PRECISION = 14
+_FLOAT_MIN_PLAIN_EXPONENT = -4
 # What PHP prints when an array is used as a string, for example as a SQL parameter.
 PHP_ARRAY_TEXT = "Array"
 
@@ -140,11 +142,22 @@ def _numeric_prefix(text: str) -> float:
 
 
 def _float_text(value: float) -> str:
+    """``(string)$value`` with ``precision = 14``: ``php_gcvt``, as php.ini on the office server has it."""
     if not math.isfinite(value):
         return "NAN" if math.isnan(value) else ("-INF" if value < 0 else "INF")
-    if value.is_integer() and abs(value) < 1e15:
-        return str(int(value))
-    return repr(float(f"{value:.14g}")).replace("e+", "E+").replace("e-", "E-")
+    sign = "-" if math.copysign(1.0, value) < 0 else ""
+    if value == 0:
+        return f"{sign}0"
+    mantissa, exponent_text = f"{abs(value):.{_FLOAT_PRECISION - 1}e}".split("e")
+    digits = mantissa.replace(".", "").rstrip("0")
+    exponent = int(exponent_text)
+    if exponent < _FLOAT_MIN_PLAIN_EXPONENT or exponent >= _FLOAT_PRECISION:
+        exponent_sign = "-" if exponent < 0 else "+"
+        return f"{sign}{digits[0]}.{digits[1:] or '0'}E{exponent_sign}{abs(exponent)}"
+    if exponent < 0:
+        return f"{sign}0.{'0' * (-exponent - 1)}{digits}"
+    whole, fraction = digits[: exponent + 1], digits[exponent + 1 :]
+    return f"{sign}{whole.ljust(exponent + 1, '0')}{'.' + fraction if fraction else ''}"
 
 
 def _decoded_entity(match: re.Match[str]) -> str:

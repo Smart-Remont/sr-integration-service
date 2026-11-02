@@ -19,12 +19,17 @@ def php_json_decode(text: str | bytes) -> object | None:
     PHP also refuses what Python takes: a BOM or UTF-16 in bytes, an unpaired ``\\uD83D``, deep
     nesting. An integer over 64 bits becomes a float.
     """
+    return _as_php_array(php_json_decode_objects(text))
+
+
+def php_json_decode_objects(text: str | bytes) -> object | None:
+    """``json_decode($text)``: an object stays an object, also an empty one or one keyed 0..n-1."""
     try:
         raw = text.decode() if isinstance(text, bytes) else text
         value = json.loads(raw, parse_constant=_reject_constant, parse_int=_php_int)
     except ValueError, RecursionError:
         return None
-    return _as_php_array(value) if _php_accepts(value) else None
+    return value if _php_accepts(value) else None
 
 
 def php_json_encode(value: object) -> bytes:

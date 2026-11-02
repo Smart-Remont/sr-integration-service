@@ -3,22 +3,17 @@ from fastapi import APIRouter, Request, Response
 from src.php_compat.zend_request import php_route
 
 from ..openapi_examples import BIG_NOTIFY_CLIENT_RESPONSES, json_body
-from ..php_contract import PhpBasicAuthDep
+from ..php_contract import PhpBasicAuthDep, response_json_method_not_allowed
 from .deps import BigNotifyClientServiceDep
-from .service import BigNotifyClientError
 
 router = APIRouter()
-
-
-async def _method_not_allowed(_: PhpBasicAuthDep) -> Response:
-    raise BigNotifyClientError("Неподдерживаемый метод")
 
 
 @php_route(
     router,
     "/big-notify-client",
     method="POST",
-    other_methods=_method_not_allowed,
+    other_methods=response_json_method_not_allowed,
     summary="Уведомление клиенту от BI Group",
     description=(
         "Вызывает BI Group. Функция БД: `rest.big_notify_client`, она получает тело запроса "

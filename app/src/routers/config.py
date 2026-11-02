@@ -26,6 +26,14 @@ class APIAutoSignPrefixConfig:
     prefix: str = "/auto_sign"
 
 
+class APIAlbatoMetaPrefixConfig:
+    prefix: str = "/albato"
+
+
+class APIShowroomPrefixConfig:
+    prefix: str = "/showroom"
+
+
 class APIPrefixConfig:
     prefix: str = "/api"
     v1: APIV1PrefixConfig = APIV1PrefixConfig()
@@ -34,6 +42,8 @@ class APIPrefixConfig:
     sms: APISmsPrefixConfig = APISmsPrefixConfig()
     client_sign: APIClientSignPrefixConfig = APIClientSignPrefixConfig()
     auto_sign: APIAutoSignPrefixConfig = APIAutoSignPrefixConfig()
+    albato_meta: APIAlbatoMetaPrefixConfig = APIAlbatoMetaPrefixConfig()
+    showroom: APIShowroomPrefixConfig = APIShowroomPrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

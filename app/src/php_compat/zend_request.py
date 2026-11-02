@@ -8,6 +8,8 @@ from typing import Any
 from urllib.parse import unquote_to_bytes
 
 from fastapi import APIRouter, Request
+from python_multipart.exceptions import FormParserError
+from starlette.exceptions import HTTPException
 
 from .text import PHP_ARRAY_TEXT
 
@@ -15,12 +17,16 @@ type PhpParam = str | dict[str, PhpParam | None]
 
 _URLENCODED = "application/x-www-form-urlencoded"
 _MULTIPART = "multipart/form-data"
+_BOUNDARY = "boundary"
 _ALL_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
 _ARRAY_INDEX = re.compile(r"\[([^\]]*)\]")
-# PHP's default max_input_vars. The rest of the input is ignored, not refused.
-_MAX_INPUT_VARS = 1000
+# max_input_vars in php.ini of the office server. The rest of the input is ignored, not refused.
+_MAX_INPUT_VARS = 100000
 # PHP stops reading a POST body only after the variable that went over the limit.
 _MAX_FORM_VARS = _MAX_INPUT_VARS + 1
+# Starlette refuses a whole form over its limits. PHP has none this low: post_max_size is 1000M.
+_MAX_FORM_PARTS = _MAX_INPUT_VARS
+_MAX_PART_BYTES = 1000 * 1024 * 1024
 
 
 class _PhpArray(dict[str, Any]):
@@ -80,6 +86,16 @@ async def read_param(request: Request, name: str) -> str:
     """
     text = php_param_text((await read_params(request)).get(name))
     return text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+async def php_raw_body(request: Request) -> bytes:
+    """``getRawBody``: the multipart parser of PHP reads ``php://input`` to its end.
+
+    It starts only when the header names a boundary. Always reads the body here: a later
+    ``read_params`` could not get at it after the form parser.
+    """
+    body = await request.body()
+    return b"" if _has_multipart_boundary(request) else body
 
 
 def php_param_text(value: PhpParam | None) -> str:
@@ -162,10 +178,27 @@ async def _form_params(request: Request) -> dict[str, PhpParam]:
     content_type = request.headers.get("content-type", "").lower()
     if content_type.startswith(_URLENCODED):
         return _parse_php_query(_form_variables(await request.body()))
-    if content_type.startswith(_MULTIPART):
-        form = await request.form()
+    if _has_multipart_boundary(request):
+        # A form that failed is not kept, and the next read would find the stream already consumed.
+        await request.body()
+        try:
+            form = await request.form(
+                max_files=_MAX_FORM_PARTS,
+                max_fields=_MAX_FORM_PARTS,
+                max_part_size=_MAX_PART_BYTES,
+            )
+        except HTTPException, FormParserError:
+            # PHP takes a broken form as an empty one. Starlette refuses it with 400 when its own
+            # parser objects, and lets the error of the parser library through otherwise.
+            return {}
         return {key: value for key, value in form.items() if isinstance(value, str)}
     return {}
+
+
+def _has_multipart_boundary(request: Request) -> bool:
+    content_type = request.headers.get("content-type", "").lower()
+    _, found, after = content_type.partition(_BOUNDARY)
+    return content_type.startswith(_MULTIPART) and bool(found) and "=" in after
 
 
 def _query_variables(raw: bytes) -> Iterable[bytes]:
