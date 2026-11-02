@@ -18,6 +18,13 @@ class DocumentParams:
     hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class IntegrationDownloadParams:
+    uuid: str
+    for_view: str
+    is_base64: bool
+
+
 async def read_document_params(request: Request) -> DocumentParams:
     params = await read_params(request)
     uuid = params.get("uuid")
@@ -27,6 +34,20 @@ async def read_document_params(request: Request) -> DocumentParams:
         redirect_uuid="" if isinstance(uuid, dict) else php_param_text(uuid),
         doc_type="" if isinstance(doc_type, dict) else php_strtoupper(php_param_text(doc_type)),
         hash=php_param_text(params.get("hash")),
+    )
+
+
+async def read_integration_download_params(
+    request: Request,
+    *,
+    default_for_view: str,
+) -> IntegrationDownloadParams:
+    """``downloadDsAction`` and ``downloadAgreementAction``: their defaults differ."""
+    params = await read_params(request)
+    return IntegrationDownloadParams(
+        uuid=php_param_text(params.get("uuid")),
+        for_view=php_param_text(params.get("for_view")) or default_for_view,
+        is_base64=bool(php_param_text(params.get("is_base64"))),
     )
 
 

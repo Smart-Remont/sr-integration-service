@@ -23,7 +23,12 @@ from .openapi_examples import (
     PAGE_RESPONSES,
     PERFORM_SIGN_RESPONSES,
 )
-from .params import read_callback_key, read_document_params, read_list_hash
+from .params import (
+    read_callback_key,
+    read_document_params,
+    read_integration_download_params,
+    read_list_hash,
+)
 
 router = APIRouter(tags=["Client documents signing"])
 
@@ -153,8 +158,8 @@ async def download_cms(request: Request, service: DownloadServiceDep) -> Respons
     response_class=Response,
 )
 async def download_agreement(request: Request, service: DownloadServiceDep) -> Response:
-    params = await read_document_params(request)
-    return await service.integration_download(DocumentType.AGREEMENT, params.uuid)
+    params = await read_integration_download_params(request, default_for_view="true")
+    return await service.integration_download(DocumentType.AGREEMENT, params)
 
 
 @php_route(
@@ -167,5 +172,6 @@ async def download_agreement(request: Request, service: DownloadServiceDep) -> R
     response_class=Response,
 )
 async def download_ds(request: Request, service: DownloadServiceDep) -> Response:
-    params = await read_document_params(request)
-    return await service.integration_download(DocumentType.DS, params.uuid)
+    # PHP's default here is boolean true, which prints as "1" in the address.
+    params = await read_integration_download_params(request, default_for_view="1")
+    return await service.integration_download(DocumentType.DS, params)

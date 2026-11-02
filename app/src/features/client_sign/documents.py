@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from src.config import ClientSignConfig, minio_config
-from src.php_compat.text import php_int, php_string
+from src.php_compat.text import php_int, php_is_truthy, php_string
 from src.storage.minio_client import get_object
 from src.storage.modes import logical_path_to_object_key
 
@@ -40,6 +40,44 @@ class DocumentSource:
             if stored:
                 return stored
         return await self._fetcher.file_get_contents(self._document_url(doc_type, row))
+
+    async def read_for_integration(
+        self,
+        doc_type: DocumentType,
+        row: dict[str, Any],
+        for_view: str,
+    ) -> bytes | None:
+        """The DOCX of ``downloadDsAction`` and ``downloadAgreementAction``: other addresses."""
+        return await self._fetcher.file_get_contents(
+            self._integration_url(doc_type, row, for_view),
+        )
+
+    def _integration_url(
+        self,
+        doc_type: DocumentType,
+        row: dict[str, Any],
+        for_view: str,
+    ) -> str:
+        request_id = php_string(row.get("client_request_id"))
+        if doc_type is DocumentType.AGREEMENT:
+            return (
+                f"{self._office()}/dict/report/mode/contract/is_pdf/false"
+                f"/for_view/{for_view}/client_request_id/{request_id}"
+            )
+        ds_id = php_string(row.get("ds_id"))
+        type_code = row.get("ds_type_code")
+        if type_code == "AGREEMENT_BARTER":
+            return f"{self._office()}/dict/report/mode/ds_agreement_barter/ds_id/{ds_id}/doc/1"
+        if type_code == "ROOM_CHANGE":
+            query = "" if php_is_truthy(for_view) else "?is_sign=true"
+            return (
+                f"{self._myspace_api()}/client_request/{request_id}/ds/{ds_id}"
+                f"/document/download/{query}"
+            )
+        return (
+            f"{self._office()}/dict/ds-download/for_view/{for_view}"
+            f"/ds_id/{ds_id}/client_request_id/{request_id}"
+        )
 
     def _document_url(self, doc_type: DocumentType, row: dict[str, Any] | None) -> str:
         values = row or {}

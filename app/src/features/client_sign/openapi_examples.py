@@ -23,9 +23,9 @@ PERFORM_SIGN_RESPONSES = {
     503: {"description": "Адрес MyNCA, адрес сервиса или секрет колбэка не настроены"},
 }
 INTEGRATION_FILE_RESPONSES = {
-    200: {"description": "Подписанный PDF", "content": {"application/pdf": {}}},
+    200: {"description": "PDF документа", "content": {"application/pdf": {}}},
     400: {"description": "Документ не найден: текст ошибки или пустое тело"},
-    503: {"description": "Неподписанный документ: конвертация DOCX в PDF не настроена"},
+    503: {"description": "Адрес MyNCA, Office или MySpace не настроен"},
 }
 CALLBACK_RESPONSES = {
     200: {

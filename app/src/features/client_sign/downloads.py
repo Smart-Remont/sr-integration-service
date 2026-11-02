@@ -1,9 +1,12 @@
 """Document files of ``ClientSignController`` and ``IntegrationController``."""
 
 import base64
+import io
 import re
+import zipfile
 from collections.abc import Awaitable
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, Response, status
 from loguru import logger
@@ -15,7 +18,7 @@ from .client import DocumentFetcher, MyncaAnswer, MyncaClient
 from .doc_types import AGREEMENT_MANUAL, DocumentType
 from .documents import DocumentSource, document_id, signed_file_name
 from .errors import ClientSignDatabaseError, ClientSignError
-from .params import DocumentParams
+from .params import DocumentParams, IntegrationDownloadParams
 from .repo import ClientSignDatabase, ClientSignRepository
 from .responses import (
     CMS_CONTENT_TYPE,
@@ -60,16 +63,20 @@ class DownloadService:
     async def download_cms(self, params: DocumentParams) -> Response:
         return await _with_error_text(self._download_cms(params), "download-cms")
 
-    async def integration_download(self, doc_type: DocumentType, uuid: str) -> Response:
+    async def integration_download(
+        self,
+        doc_type: DocumentType,
+        params: IntegrationDownloadParams,
+    ) -> Response:
         """``downloadDsAction`` and ``downloadAgreementAction``.
 
-        An unsigned document goes through LibreOffice on the old server. The service has no such
-        tool, so that branch answers 503 until it is decided how to convert (see STATUS.md).
+        PHP converted an unsigned document with LibreOffice on the old server. The service converts
+        through MyNCA, as ``client-sign/download`` does: the PDF bytes differ, the rest does not.
         """
         error_text = ""
         row: dict[str, Any] | None = None
         try:
-            row = await self._row(doc_type, uuid)
+            row = await self._row(doc_type, params.uuid)
         except ClientSignDatabaseError as exc:
             error_text = exc.message
         if row is None:
@@ -77,11 +84,17 @@ class DownloadService:
             return json_body_response(error_text, _BAD_REQUEST)
         if row.get("signed"):
             return await self._partner_file(doc_type, row)
-        logger.warning("Unsigned document conversion is not available | type={t}", t=doc_type)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Конвертация DOCX в PDF не настроена",
-        )
+        docx = await self._documents.read_for_integration(doc_type, row, params.for_view)
+        if not _is_docx(docx):
+            return json_body_response("", _BAD_REQUEST)
+        try:
+            pdf = await self._convert_to_pdf(docx)
+        except ClientSignError:
+            logger.error("Unsigned document conversion failed | type={t}", t=doc_type)
+            return json_body_response("", _BAD_REQUEST)
+        if params.is_base64:
+            return php_text_response(base64.b64encode(pdf).decode("ascii"))
+        return file_response(pdf, PDF_CONTENT_TYPE, f"auto_{uuid4().hex}.pdf")
 
     async def _download(self, params: DocumentParams) -> Response:
         doc_type = _known_type(params.doc_type)
@@ -91,16 +104,21 @@ class DownloadService:
         docx = await self._documents.read(doc_type, row)
         if not docx:
             raise ClientSignError("Не удалось получить документ")
+        return file_response(
+            await self._convert_to_pdf(docx),
+            PDF_CONTENT_TYPE,
+            signed_file_name(doc_type, row, "pdf"),
+        )
+
+    async def _convert_to_pdf(self, docx: bytes) -> bytes:
         answer = await self._mynca_client().docx_to_pdf(docx)
         pdf = answer.field("pdf")
         if not answer.status or pdf is None:
             message = answer.field("message")
-            raise ClientSignError("Ошибка конвертации" if message is None else php_string(message))
-        return file_response(
-            _php_base64_decode(php_string(pdf)),
-            PDF_CONTENT_TYPE,
-            signed_file_name(doc_type, row, "pdf"),
-        )
+            raise ClientSignError(
+                "Ошибка конвертации" if message is None else php_string(message),
+            )
+        return _php_base64_decode(php_string(pdf))
 
     async def _download_signed(self, params: DocumentParams) -> Response:
         doc_type = _known_type(params.doc_type)
@@ -200,3 +218,15 @@ def _php_base64_decode(text: str) -> bytes:
     usable = len(cleaned) - (len(cleaned) % _BASE64_BLOCK == 1)
     padding = b"=" * (-usable % _BASE64_BLOCK)
     return base64.b64decode(cleaned[:usable] + padding)
+
+
+def _is_docx(content: bytes | None) -> bool:
+    """PHP ``isDocx``: a ZIP with these two entries."""
+    if not content:
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            names = archive.namelist()
+    except zipfile.BadZipFile:
+        return False
+    return "word/document.xml" in names and "[Content_Types].xml" in names

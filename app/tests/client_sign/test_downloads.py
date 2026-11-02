@@ -1,5 +1,8 @@
 """Downloads. Error paths were compared with the stand; paths through MyNCA are covered only here."""
 
+import io
+import re
+import zipfile
 from types import SimpleNamespace
 
 import httpx
@@ -446,22 +449,132 @@ async def test_integration_signed_document_comes_from_the_partner(
     assert partners.urls() == [PARTNER_DS]
 
 
+INTEGRATION_DS_DOCX = "https://office.test/dict/ds-download/for_view/1/ds_id/5/client_request_id/7"
+INTEGRATION_AGREEMENT_DOCX = (
+    "https://office.test/dict/report/mode/contract/is_pdf/false/for_view/true/client_request_id/7"
+)
+UNSIGNED_AGREEMENT = {"client_request_id": 7, "signed": False}
+
+
+def real_docx() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", "<w/>")
+        archive.writestr("[Content_Types].xml", "<t/>")
+    return buffer.getvalue()
+
+
 @pytest.mark.parametrize(
-    ("route", "function", "row"),
+    ("route", "function", "row", "docx_url"),
     [
-        ("download-ds", DS_FUNCTION, UNSIGNED_DS),
-        ("download-agreement", AGREEMENT_FUNCTION, {"client_request_id": 7, "signed": False}),
+        ("download-ds", DS_FUNCTION, UNSIGNED_DS, INTEGRATION_DS_DOCX),
+        ("download-agreement", AGREEMENT_FUNCTION, UNSIGNED_AGREEMENT, INTEGRATION_AGREEMENT_DOCX),
     ],
 )
-async def test_integration_unsigned_document_stops_at_503_without_a_partner_call(
+async def test_integration_unsigned_document_is_converted_by_mynca(
     client: AsyncClient,
     connection: FakeConnection,
     partners: Partners,
     route: str,
     function: str,
     row: dict[str, object],
+    docx_url: str,
 ) -> None:
     connection.handlers = {function: [row]}
+    partners.routes[docx_url] = httpx.Response(200, content=real_docx())
+    partners.routes[CONVERT] = httpx.Response(200, json={"pdf": "JVBERg=="})
+
     response = await client.get(f"{BASE}/{route}/uuid/u")
-    assert response.status_code == 503
-    assert partners.requests == []
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF"
+    assert response.headers["content-type"] == "application/pdf"
+    assert re.fullmatch(
+        r"attachment; filename=auto_[0-9a-f]{32}\.pdf",
+        response.headers["content-disposition"],
+    )
+    assert response.headers["pragma"] == "public"
+
+
+async def test_integration_is_base64_answers_with_text(
+    client: AsyncClient, connection: FakeConnection, partners: Partners
+) -> None:
+    connection.handlers = {DS_FUNCTION: [UNSIGNED_DS]}
+    partners.routes[INTEGRATION_DS_DOCX] = httpx.Response(200, content=real_docx())
+    partners.routes[CONVERT] = httpx.Response(200, json={"pdf": "JVBERg=="})
+
+    response = await client.get(f"{BASE}/download-ds/is_base64/true/uuid/u")
+
+    assert response.status_code == 200
+    assert response.text == "JVBERg=="
+    assert response.headers["content-type"].startswith("text/html")
+
+
+@pytest.mark.parametrize(
+    ("for_view", "row", "url"),
+    [
+        (
+            "false",
+            UNSIGNED_DS,
+            "https://office.test/dict/ds-download/for_view/false/ds_id/5/client_request_id/7",
+        ),
+        (
+            "false",
+            {**UNSIGNED_DS, "ds_type_code": "ROOM_CHANGE"},
+            "https://myspace.test/client_request/7/ds/5/document/download/",
+        ),
+        (
+            "0",
+            {**UNSIGNED_DS, "ds_type_code": "ROOM_CHANGE"},
+            "https://myspace.test/client_request/7/ds/5/document/download/?is_sign=true",
+        ),
+        (
+            "1",
+            {**UNSIGNED_DS, "ds_type_code": "AGREEMENT_BARTER"},
+            "https://office.test/dict/report/mode/ds_agreement_barter/ds_id/5/doc/1",
+        ),
+    ],
+)
+async def test_integration_ds_address_follows_php(
+    client: AsyncClient,
+    connection: FakeConnection,
+    partners: Partners,
+    for_view: str,
+    row: dict[str, object],
+    url: str,
+) -> None:
+    connection.handlers = {DS_FUNCTION: [row]}
+    partners.routes[url] = httpx.Response(200, content=real_docx())
+    partners.routes[CONVERT] = httpx.Response(200, json={"pdf": "JVBERg=="})
+
+    response = await client.get(f"{BASE}/download-ds/uuid/u/for_view/{for_view}")
+
+    assert response.status_code == 200
+    assert partners.urls()[0] == url
+
+
+@pytest.mark.parametrize("content", [b"", b"<html>not a document</html>"])
+async def test_integration_source_that_is_not_docx_is_400_without_conversion(
+    client: AsyncClient, connection: FakeConnection, partners: Partners, content: bytes
+) -> None:
+    connection.handlers = {DS_FUNCTION: [UNSIGNED_DS]}
+    partners.routes[INTEGRATION_DS_DOCX] = httpx.Response(200, content=content)
+
+    response = await client.get(f"{BASE}/download-ds/uuid/u")
+
+    assert response.status_code == 400
+    assert response.content == b""
+    assert CONVERT not in partners.urls()
+
+
+async def test_integration_failed_conversion_is_400(
+    client: AsyncClient, connection: FakeConnection, partners: Partners
+) -> None:
+    connection.handlers = {DS_FUNCTION: [UNSIGNED_DS]}
+    partners.routes[INTEGRATION_DS_DOCX] = httpx.Response(200, content=real_docx())
+    partners.routes[CONVERT] = httpx.Response(500, json={"message": "нет"})
+
+    response = await client.get(f"{BASE}/download-ds/uuid/u")
+
+    assert response.status_code == 400
+    assert response.content == b""
