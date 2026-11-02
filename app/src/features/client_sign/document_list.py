@@ -5,9 +5,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import Response
 from loguru import logger
 
+from src.php_compat.responses import php_html_response
+
 from .errors import ClientSignDatabaseError
 from .repo import ClientSignDatabase, ClientSignRepository
-from .responses import html_response
 from .views import OLD_SIGN_DOC_LIST_PAGE, render_sign_doc_list, render_sign_doc_list_error
 
 
@@ -23,7 +24,7 @@ class DocumentListService:
             )
         except ClientSignDatabaseError:
             logger.warning("client-sign list: hash lookup failed")
-            return html_response(render_sign_doc_list_error("Заявка не найдена"))
+            return php_html_response(render_sign_doc_list_error("Заявка не найдена"))
         client_info = await self._read_or(
             None, lambda repository: repository.client_info(request_id)
         )
@@ -33,7 +34,7 @@ class DocumentListService:
         deleted = await self._read_or(
             [], lambda repository: repository.deleted_signatures(request_id)
         )
-        return html_response(
+        return php_html_response(
             render_sign_doc_list(
                 request_hash=request_hash,
                 client_info=client_info,
@@ -56,4 +57,4 @@ class DocumentListService:
 
 def old_sign_doc_list() -> Response:
     """``ClientController::signDocListAction`` returns at its first line: the page has no data."""
-    return html_response(OLD_SIGN_DOC_LIST_PAGE)
+    return php_html_response(OLD_SIGN_DOC_LIST_PAGE)

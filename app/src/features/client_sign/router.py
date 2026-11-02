@@ -6,7 +6,7 @@ the address, an md5 with the database secret, is the caller check (CLAUDE.md, te
 
 from fastapi import APIRouter, Request, Response
 
-from src.shared.zend_request import php_route
+from src.php_compat.zend_request import php_route
 
 from .deps import (
     DocumentListServiceDep,

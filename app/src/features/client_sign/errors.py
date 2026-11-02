@@ -1,4 +1,4 @@
-from src.shared.php_db_errors import php_clean_error, php_error_state, php_pdo_message
+from src.php_compat.pdo_errors import php_clean_error, php_error_state, php_pdo_message
 
 
 class ClientSignDatabaseError(Exception):

@@ -9,6 +9,8 @@ _ENTITY = re.compile(r"&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);")
 _NUMERIC_PREFIX = re.compile(r"[ \t\n\r\v\f]*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
 _TAG_NAME = re.compile(r"</?([^\s/>]*)")
 _MAX_CODE_POINT = 0x10FFFF
+# What PHP prints when an array is used as a string, for example as a SQL parameter.
+PHP_ARRAY_TEXT = "Array"
 
 
 def php_html_escape(value: object) -> str:
@@ -69,6 +71,19 @@ def php_is_truthy(value: object) -> bool:
     return bool(value)
 
 
+def is_php_empty(value: object) -> bool:
+    """The controller's ``is_null or empty or strlen(trim(...)) === 0``."""
+    if isinstance(value, str):
+        return php_trim(value) in ("", "0")
+    # trim() of an array gives null, so an array of any size counts as empty.
+    return isinstance(value, list | dict) or not value
+
+
+def zero_to_null[T](value: T) -> T | None:
+    """PHP ``zeroToNull``, and ``!empty($x) ? $x : null``: an empty value means "not passed"."""
+    return value if php_is_truthy(value) else None
+
+
 def php_string(value: object) -> str:
     """``(string)$value``."""
     match value:
@@ -79,7 +94,7 @@ def php_string(value: object) -> str:
         case str():
             return value
         case list() | dict():
-            return "Array"
+            return PHP_ARRAY_TEXT
         case float():
             return _float_text(value)
         case _:

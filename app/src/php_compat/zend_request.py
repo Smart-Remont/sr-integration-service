@@ -9,14 +9,14 @@ from urllib.parse import unquote_to_bytes
 
 from fastapi import APIRouter, Request
 
+from .text import PHP_ARRAY_TEXT
+
 type PhpParam = str | dict[str, PhpParam | None]
 
 _URLENCODED = "application/x-www-form-urlencoded"
 _MULTIPART = "multipart/form-data"
 _ALL_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
 _ARRAY_INDEX = re.compile(r"\[([^\]]*)\]")
-# What PHP prints when an array is used as a string, for example as a SQL parameter.
-PHP_ARRAY_TEXT = "Array"
 # PHP's default max_input_vars. The rest of the input is ignored, not refused.
 _MAX_INPUT_VARS = 1000
 # PHP stops reading a POST body only after the variable that went over the limit.

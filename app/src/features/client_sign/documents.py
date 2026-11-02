@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from src.config import ClientSignConfig, minio_config
-from src.shared.php_text import php_int, php_string
+from src.php_compat.text import php_int, php_string
 from src.storage.minio_client import get_object
 from src.storage.modes import logical_path_to_object_key
 

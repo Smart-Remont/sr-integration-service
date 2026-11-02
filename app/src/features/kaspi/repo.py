@@ -3,10 +3,9 @@ from collections.abc import Sequence
 
 from asyncpg.transaction import Transaction
 
+from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
-from src.shared.php_db_errors import php_invalid_encoding_message
-from src.shared.php_json import pg_row
 
 from .errors import KaspiDatabaseError
 from .params import KaspiLogEntry
@@ -76,8 +75,7 @@ class KaspiRepository(BaseRepository):
         return scalar_from_sp_rows(rows)
 
     async def after_payment_operations(self, payment_id: int | None) -> None:
-        text_id = None if payment_id is None else str(payment_id)
-        await self._call("public.after_payment_operations", (text_id,), (_INT,))
+        await self._call("public.after_payment_operations", (pdo_text(payment_id),), (_INT,))
 
     async def insert_kaspi_pay_log(self, entry: KaspiLogEntry) -> None:
         await self._call(
@@ -104,7 +102,7 @@ class KaspiRepository(BaseRepository):
         *,
         cursor: bool = False,
     ) -> SpRows:
-        bound_args = [_php_string(arg) for arg in args]
+        bound_args = [pdo_bound_text(arg, KaspiDatabaseError) for arg in args]
         try:
             return await self.call_sp(
                 function,
@@ -121,14 +119,3 @@ def account_lock_key(account: str) -> int:
     """The signed 64-bit key of ``pg_advisory_xact_lock``."""
     text = f"{_LOCK_KEY_PREFIX}{account}".encode("utf-8", "surrogateescape")
     return int.from_bytes(hashlib.sha256(text).digest()[:8], "big", signed=True)
-
-
-def _php_string(value: str | None) -> str | None:
-    if value is None:
-        return None
-    # libpq takes a C string: the value ends at the first NUL byte.
-    text = value.partition("\0")[0]
-    message = php_invalid_encoding_message(text)
-    if message:
-        raise KaspiDatabaseError(message)
-    return text

@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 from fastapi import Response, status
 from loguru import logger
 
-from src.shared.php_db_errors import php_pdo_error_text
-from src.shared.php_json import php_json_encode_pretty
+from src.php_compat.json_codec import php_json_encode_pretty
+from src.php_compat.pdo_errors import php_pdo_error_text
 
 from ..errors import BigIntegrationDatabaseError
 from ..php_contract import BigIntegrationRequestError, php_response

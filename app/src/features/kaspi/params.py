@@ -3,8 +3,8 @@ from enum import IntEnum
 
 from fastapi import Request
 
-from src.shared.php_json import php_json_encode_default
-from src.shared.zend_request import ZendParams, php_param_text, read_params
+from src.php_compat.json_codec import php_json_encode_default
+from src.php_compat.zend_request import ZendParams, php_param_text, read_params
 
 _CONTROLLER = "client"
 _ACTION = "kaspi-request-pay"

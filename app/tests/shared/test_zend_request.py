@@ -1,6 +1,6 @@
 from fastapi import Request
 
-from src.shared.zend_request import read_param, read_params
+from src.php_compat.zend_request import read_param, read_params
 
 
 def _request(query: bytes, *, path: str = "/route", tail: str | None = None) -> Request:

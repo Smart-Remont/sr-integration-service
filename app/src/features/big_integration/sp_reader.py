@@ -1,7 +1,7 @@
+from src.php_compat.pdo_errors import php_error_text
+from src.php_compat.pdo_values import pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows
-from src.shared.php_db_errors import php_error_text
-from src.shared.php_json import pg_row
 
 from .errors import BigIntegrationDatabaseError
 

@@ -10,8 +10,8 @@ from urllib.parse import quote
 import httpx
 from loguru import logger
 
-from src.shared.php_json import php_json_encode_unescaped
-from src.shared.php_text import php_string
+from src.php_compat.json_codec import php_json_encode_unescaped
+from src.php_compat.text import php_string
 
 _USER_AGENT = "smremont-mynca-client/1.0"
 _MYNCA_TIMEOUT = httpx.Timeout(timeout=30.0, connect=10.0)

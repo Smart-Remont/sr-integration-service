@@ -1,7 +1,7 @@
 import pytest
 
 from src.features.client_sign.views import ParsedDn, parse_dn
-from src.shared.php_text import (
+from src.php_compat.text import (
     php_casefold_equal,
     php_html_entity_decode,
     php_html_escape,

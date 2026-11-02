@@ -2,14 +2,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response
 
+from src.php_compat.text import is_php_empty
 from src.repository.base import SpRows
 
-from ..php_contract import (
-    BigIntegrationRequestError,
-    is_php_empty,
-    php_success_response,
-    php_text,
-)
+from ..php_contract import BigIntegrationRequestError, php_success_response, php_text
 from .filling import PresetFillingLoader
 
 if TYPE_CHECKING:

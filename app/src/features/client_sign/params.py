@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from fastapi import Request
 
-from src.shared.php_text import php_strtoupper
-from src.shared.zend_request import PhpParam, php_param_text, read_params
+from src.php_compat.text import php_strtoupper
+from src.php_compat.zend_request import PhpParam, php_param_text, read_params
 
 
 @dataclass(frozen=True)

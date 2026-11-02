@@ -16,12 +16,13 @@ from typing import TYPE_CHECKING, NoReturn
 from fastapi import Response
 from loguru import logger
 
+from src.php_compat.json_codec import php_json_encode_default
+from src.php_compat.responses import php_html_response
 from src.repository.base import SpRow
-from src.shared.php_json import php_json_encode_default
 
 from .errors import KaspiDatabaseError, KaspiRefusalError
 from .params import KaspiLogEntry, KaspiLogStatus, KaspiParams
-from .responses import kaspi_empty_page_response, kaspi_xml_response
+from .responses import kaspi_xml_response
 from .xml import check_xml, error_xml, pay_xml
 
 if TYPE_CHECKING:
@@ -38,11 +39,11 @@ class KaspiService:
 
     async def serve(self, params: KaspiParams) -> Response:
         if params.command not in (_COMMAND_CHECK, _COMMAND_PAY):
-            return kaspi_empty_page_response()
+            return php_html_response()
         if params.txn_id_is_array:
             # PHP died on this in createElement, after the payment had been recorded.
             logger.warning("Kaspi {command}: txn_id is an array", command=params.command)
-            return kaspi_empty_page_response()
+            return php_html_response()
         if params.command == _COMMAND_CHECK:
             return await self._check(params)
         return await self._pay(params)

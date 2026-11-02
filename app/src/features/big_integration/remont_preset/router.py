@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Response
 
-from src.shared.php_json import php_json_decode
-from src.shared.zend_request import php_route
+from src.php_compat.json_codec import php_json_decode
+from src.php_compat.zend_request import php_route
 
 from ..openapi_examples import PLACEMENT_BODY, PLACEMENT_PRESET_BODY, REMONT_PRESET_RESPONSES
 from ..php_contract import PhpBasicAuthDep, method_not_allowed

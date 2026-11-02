@@ -4,7 +4,8 @@ from uuid import UUID
 
 import pytest
 
-from src.shared.php_json import pg_row, php_json_decode, php_json_encode, php_json_encode_pretty
+from src.php_compat.json_codec import php_json_decode, php_json_encode, php_json_encode_pretty
+from src.php_compat.pdo_values import pg_row
 
 
 @pytest.mark.parametrize(

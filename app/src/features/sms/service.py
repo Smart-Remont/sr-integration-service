@@ -21,8 +21,14 @@ from itertools import batched
 from fastapi import Response
 from loguru import logger
 
+from src.php_compat.json_codec import (
+    php_json_decode,
+    php_json_encode_pretty,
+    php_json_encode_unescaped,
+)
+from src.php_compat.pdo_values import pdo_text
+from src.php_compat.text import zero_to_null
 from src.repository.base import SpRow
-from src.shared.php_json import php_json_decode, php_json_encode_pretty, php_json_encode_unescaped
 
 from .client import KcellClient, KcellRequestError
 from .limits import database_step_limit
@@ -99,14 +105,14 @@ class SmsService:
             logger.error("Kcell reply is not JSON, {count} messages stay queued", count=len(ids))
             return True
         fields = _object_fields(answer)
-        batch_id = _text_or_null(fields.get("batch_id"))
-        results = _non_empty(fields.get("results"))
+        batch_id = pdo_text(fields.get("batch_id"))
+        results = zero_to_null(fields.get("results"))
         try:
             async with database_step_limit(), self.repository.transaction():
                 await self.repository.sms_notify_result__set(
                     ids=ids,
                     batch_id=batch_id,
-                    created_at=_text_or_null(fields.get("created_at")),
+                    created_at=pdo_text(fields.get("created_at")),
                     response=answer.decode("utf-8", "surrogateescape"),
                     results=None if results is None else php_json_encode_unescaped(results),
                 )
@@ -133,7 +139,7 @@ class SmsService:
                 error=str(exc),
             )
             return
-        messages = _non_empty(_object_fields(answer).get("messages"))
+        messages = zero_to_null(_object_fields(answer).get("messages"))
         if messages is None:
             return
         try:
@@ -153,16 +159,6 @@ def _log_failure(step: str, exc: Exception) -> None:
 def _object_fields(answer: bytes) -> SpRow:
     decoded = php_json_decode(answer)
     return decoded if isinstance(decoded, dict) else {}
-
-
-def _non_empty(value: object) -> object | None:
-    """``isset($x) && $x !== null && !empty($x) ? $x : null``."""
-    return None if not value or value == "0" else value
-
-
-def _text_or_null(value: object) -> str | None:
-    """PDO sends every value as a string and null as NULL. Kcell's fields here are strings."""
-    return None if value is None else str(value)
 
 
 def _is_json(answer: bytes) -> bool:

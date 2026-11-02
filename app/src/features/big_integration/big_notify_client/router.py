@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, Response
 
-from src.shared.zend_request import php_route
+from src.php_compat.zend_request import php_route
 
 from ..openapi_examples import BIG_NOTIFY_CLIENT_RESPONSES, json_body
 from ..php_contract import PhpBasicAuthDep

@@ -11,9 +11,10 @@ from fastapi.security import HTTPBasic
 from loguru import logger
 
 from src.config import big_integration_auth_config
+from src.php_compat.json_codec import php_json_encode
+from src.php_compat.pdo_errors import is_php_unhandled_error
+from src.php_compat.responses import PHP_HTML_CONTENT_TYPE
 from src.security import verify_basic_credentials
-from src.shared.php_db_errors import is_php_unhandled_error
-from src.shared.php_json import php_json_encode
 
 from .errors import BigIntegrationDatabaseError
 
@@ -84,7 +85,7 @@ def register_big_integration_handlers(app: FastAPI) -> None:
         # PHP sends no body here, and text/html is its default content type.
         return Response(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            media_type="text/html; charset=UTF-8",
+            media_type=PHP_HTML_CONTENT_TYPE,
             headers={**_CACHE_HEADERS, "WWW-Authenticate": 'Basic realm="Access denied"'},
         )
 
@@ -117,19 +118,6 @@ PhpBasicAuthDep = Annotated[None, Depends(_require_php_basic_auth)]
 
 async def method_not_allowed(_: PhpBasicAuthDep) -> Response:
     return php_error_response(_METHOD_NOT_ALLOWED, status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-def zero_to_null(value: str) -> str | None:
-    """PHP ``zeroToNull``: an empty value and ``"0"`` mean "not passed"."""
-    return None if value in ("", "0") else value
-
-
-def is_php_empty(value: object) -> bool:
-    """The controller's ``is_null or empty or strlen(trim(...)) === 0``."""
-    if isinstance(value, str):
-        return value.strip(" \t\n\r\0\x0b") in ("", "0")
-    # trim() of an array gives null, so an array of any size counts as empty.
-    return isinstance(value, list | dict) or not value
 
 
 def php_text(value: object) -> str:

@@ -2,8 +2,8 @@
 
 from fastapi import Response
 
-from src.shared.php_json import php_json_encode_default
-from src.shared.php_response import PHP_HTML_CONTENT_TYPE, PHP_SESSION_HEADERS
+from src.php_compat.json_codec import php_json_encode_default
+from src.php_compat.responses import PHP_HTML_CONTENT_TYPE, PHP_SESSION_HEADERS, php_html_response
 
 PDF_CONTENT_TYPE = "application/pdf"
 CMS_CONTENT_TYPE = "application/pkcs7-signature"
@@ -19,15 +19,8 @@ _FILE_HEADERS = {
 }
 
 
-def html_response(body: bytes) -> Response:
-    return Response(
-        content=body,
-        headers={"Content-Type": PHP_HTML_CONTENT_TYPE, **PHP_SESSION_HEADERS},
-    )
-
-
 def php_text_response(text: str) -> Response:
-    return html_response(text.encode("utf-8", "surrogateescape"))
+    return php_html_response(text.encode("utf-8", "surrogateescape"))
 
 
 def json_answer(answer: dict[str, object], status_code: int = 200) -> Response:

@@ -21,7 +21,7 @@ nginx `office.smartremont.kz` (PHP) отправляет сюда только �
 
 Не меняются: HTTP-коды, ключи конверта `{data, response, error}`, тексты ошибок, типы значений (`Decimal` → число, дата → ISO-строка). Всё это закреплено в `app/tests/big_integration/test_contract.py` и `app/tests/test_app.py`; эти тесты проходят и на коде `main`. Упавший тест здесь означает поломку у BI Group, а не повод поправить тест. Новый маршрут BIG добавляется отдельной папкой и не меняет общие `responses.py`, `http.py`, `errors.py`.
 
-Маршруты, перенесённые из PHP позже, ещё не заведены в nginx; список и порядок — `../myspace/features/legacy-integrations/STATUS.md`. Они отдают значения как PHP (`src/shared/php_json.py`: numeric и даты текстом), а ошибки поднимают исключением (`features/big_integration/php_contract.py`), чтобы транзакция откатилась. Новые маршруты, переносимые из PHP, строятся так же, общий код — `src/shared/` (`zend_request.py`, `php_db_errors.py`, `php_xml.py`).
+Маршруты, перенесённые из PHP позже, ещё не заведены в nginx; список и порядок — `../myspace/features/legacy-integrations/STATUS.md`. Они отдают значения как PHP (`src/php_compat/pdo_values.py`: numeric и даты текстом), а ошибки поднимают исключением (`features/big_integration/php_contract.py`), чтобы транзакция откатилась. Новые маршруты, переносимые из PHP, строятся так же, общий код — `src/php_compat/`.
 
 ## Ветки
 
@@ -57,13 +57,19 @@ app/
     ├── security/basic_auth.py   basic_auth_dependency() — единственная реализация Basic Auth
     ├── integration_context/     JWT X-Integration-Context от прокси CRM (сотрудник, scope, заявка)
     ├── shared/                  общая логика нескольких интеграций (deal_guard)
+    ├── php_compat/              поведение PHP-офиса: JSON, значения и ошибки PDO, адреса Zend, XML
     ├── storage/                 MinIO: режимы, пути /documents/..., загрузка
     ├── schema/base.py           BaseSchema для Pydantic-моделей /api/v1
     ├── routers/                 сборка URL: /api + /v1 | /big_integration
     └── features/<интеграция>/   одна папка — одна интеграция
+        ├── kaspi/               оплата заявок Kaspi, перенос из PHP
+        ├── sms/                 кроны отправки SMS и статусов Kcell, перенос из PHP
+        └── client_sign/         страницы подписи документов клиентом, перенос из PHP
 ```
 
 Путь запроса: `router` → `service` → `repository` (`call_sp`) и `client` (внешний HTTP). Ответ: Pydantic-модель или конверт BIG.
+
+`php_compat/` нужен только маршрутам, перенесённым из PHP с замороженным контрактом: они повторяют ответы PHP до байта. Новые интеграции его не используют и строятся по правилам ниже. Когда партнёры уйдут со старого контракта, такие маршруты удаляются, а вместе с ними и этот пакет.
 
 ## Правила кода
 

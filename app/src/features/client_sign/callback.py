@@ -7,9 +7,9 @@ from typing import Any
 from fastapi import HTTPException, Response, status
 from loguru import logger
 
-from src.shared.php_json import php_json_decode
-from src.shared.php_text import php_int, php_is_positive, php_string, php_strtoupper
-from src.shared.zend_request import PhpParam
+from src.php_compat.json_codec import php_json_decode
+from src.php_compat.text import php_int, php_is_positive, php_string, php_strtoupper
+from src.php_compat.zend_request import PhpParam
 
 from .callback_key import is_callback_key_valid
 from .doc_types import DocumentType, SignTypeCode

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request, Response
 
-from src.shared.zend_request import php_route, read_param
+from src.php_compat.zend_request import php_route, read_param
 
 from ..openapi_examples import (
     DDU_REQUEST_INFO_RESPONSES,

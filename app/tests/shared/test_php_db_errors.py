@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from asyncpg.exceptions import PostgresError, RaiseError, UndefinedColumnError
 
-from src.shared.php_db_errors import (
+from src.php_compat.pdo_errors import (
     is_php_unhandled_error,
     php_clean_error,
     php_error_text,

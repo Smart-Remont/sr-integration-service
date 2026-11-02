@@ -2,8 +2,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response
 
+from src.php_compat.json_codec import php_json_decode
 from src.repository.base import SpRow
-from src.shared.php_json import php_json_decode
 
 from ..php_contract import php_success_response
 

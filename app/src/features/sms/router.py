@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 
-from src.shared.zend_request import php_route
+from src.php_compat.zend_request import php_route
 
 from .auth import require_kcell_send_config, require_kcell_status_config, require_sms_cron_auth
 from .deps import SmsServiceDep

@@ -3,10 +3,10 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from asyncpg import InterfaceError, Pool, PostgresError
 
+from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
+from src.php_compat.text import zero_to_null
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
-from src.shared.php_db_errors import php_invalid_encoding_message
-from src.shared.php_json import pg_row
 
 from .doc_types import DocumentType
 from .errors import ClientSignDatabaseError
@@ -44,8 +44,9 @@ class ClientSignRepository(BaseRepository):
 
     async def document_by_uuid(self, doc_type: DocumentType, uuid: str) -> SpRow | None:
         # zeroToNull: the functions answer "Документ не найден" to NULL.
-        bound_uuid = None if uuid in ("", "0") else uuid
-        rows = await self._call(_DOCUMENT_FUNCTIONS[doc_type], (bound_uuid,), (None,), cursor=True)
+        rows = await self._call(
+            _DOCUMENT_FUNCTIONS[doc_type], (zero_to_null(uuid),), (None,), cursor=True
+        )
         return pg_row(rows[0]) if rows else None
 
     async def lock_sign_process(self, sign_process_id: str) -> None:
@@ -77,9 +78,9 @@ class ClientSignRepository(BaseRepository):
         rows = await self._call(
             "client.insert_sign_general",
             (
-                _text_or_none(client_request_id),
-                _text_or_none(ds_id),
-                _text_or_none(client_request_document_id),
+                pdo_text(client_request_id),
+                pdo_text(ds_id),
+                pdo_text(client_request_document_id),
                 sign_type_code,
                 # The signed document itself stays in MyNCA, sign_tab keeps a marker.
                 "SIGN_CMS",
@@ -102,12 +103,12 @@ class ClientSignRepository(BaseRepository):
     ) -> None:
         await self._call(
             "client.sign_tab__modify",
-            (_text_or_none(sign_id), sign_process_id, sign_group_id, "CMS", None),
+            (pdo_text(sign_id), sign_process_id, sign_group_id, "CMS", None),
             (_INT, _UUID, _UUID, None, None),
         )
 
     async def _read_cursor(self, function: str, client_request_id: int | None) -> SpRows:
-        rows = await self._call(function, (_text_or_none(client_request_id),), (_INT,), cursor=True)
+        rows = await self._call(function, (pdo_text(client_request_id),), (_INT,), cursor=True)
         return [pg_row(row) for row in rows]
 
     async def _call(
@@ -118,7 +119,7 @@ class ClientSignRepository(BaseRepository):
         *,
         cursor: bool = False,
     ) -> SpRows:
-        bound_args = [_php_string(arg) for arg in args]
+        bound_args = [pdo_bound_text(arg, _invalid_encoding_error) for arg in args]
         try:
             return await self.call_sp(
                 function,
@@ -152,16 +153,5 @@ def sign_process_lock_key(sign_process_id: str) -> int:
     return int.from_bytes(hashlib.sha256(text).digest()[:8], "big", signed=True)
 
 
-def _text_or_none(value: object | None) -> str | None:
-    return None if value is None else str(value)
-
-
-def _php_string(value: str | None) -> str | None:
-    if value is None:
-        return None
-    # libpq takes a C string: the value ends at the first NUL byte.
-    text = value.partition("\0")[0]
-    message = php_invalid_encoding_message(text)
-    if message:
-        raise ClientSignDatabaseError(message, _INVALID_ENCODING_STATE)
-    return text
+def _invalid_encoding_error(pdo_message: str) -> ClientSignDatabaseError:
+    return ClientSignDatabaseError(pdo_message, _INVALID_ENCODING_STATE)

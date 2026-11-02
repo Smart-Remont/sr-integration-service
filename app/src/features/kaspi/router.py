@@ -5,7 +5,7 @@ The dependency of the router runs first, before any parameter or body is read.
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from src.shared.zend_request import php_route
+from src.php_compat.zend_request import php_route
 
 from .auth import require_kaspi_proxy_secret
 from .deps import KaspiServiceDep

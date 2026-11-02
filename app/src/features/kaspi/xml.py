@@ -1,7 +1,7 @@
 """Kaspi answers. The order of elements and every empty element are as in PHP."""
 
+from src.php_compat.dom_xml import DomElement, dom_save_xml
 from src.repository.base import SpRow
-from src.shared.php_xml import DomElement, dom_save_xml
 
 _FIELDS = (
     ("field1", "prop_fio", "ФИО"),

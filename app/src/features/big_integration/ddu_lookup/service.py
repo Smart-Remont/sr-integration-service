@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response, status
 
-from src.shared.php_db_errors import php_pdo_error_text
+from src.php_compat.pdo_errors import php_pdo_error_text
+from src.php_compat.text import zero_to_null
 
-from ..php_contract import BigIntegrationRequestError, php_success_response, zero_to_null
+from ..php_contract import BigIntegrationRequestError, php_success_response
 
 if TYPE_CHECKING:
     from .repo import DduLookupRepository

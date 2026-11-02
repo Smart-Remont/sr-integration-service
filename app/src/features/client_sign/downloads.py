@@ -9,7 +9,7 @@ from fastapi import HTTPException, Response, status
 from loguru import logger
 
 from src.config import ClientSignConfig
-from src.shared.php_text import php_html_escape, php_is_truthy, php_string
+from src.php_compat.text import php_html_escape, php_is_truthy, php_string
 
 from .client import DocumentFetcher, MyncaAnswer, MyncaClient
 from .doc_types import AGREEMENT_MANUAL, DocumentType

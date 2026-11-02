@@ -7,9 +7,7 @@ from asyncpg.exceptions import RaiseError, UndefinedFunctionError
 from httpx import AsyncClient
 from loguru import logger
 
-from tests.big_integration.test_contract import FakeConnection, _auth, client, db
-
-__all__ = ("client", "db")
+from tests.big_integration.fakes import FakeConnection, _auth
 
 URL = "/api/big_integration/request-info"
 FUNCTION = "rest.ddu_request_info"
