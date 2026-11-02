@@ -1,7 +1,11 @@
-"""Filling of a preset: sections → rooms → work sets → material sets.
+"""Filling of a preset, section by section, as production PHP builds it.
 
 The list route gives each material set its features, items and photos. The price route gives
 only its name and price, and cuts the fields of a room-and-work-set section down as well.
+
+Production PHP keeps $additional and $work_set between sections and presets, and BI Group gets
+the result: a work-set section holds only the last work set, or the one left from before when
+it has none (null if there was none yet). The loader reproduces this on purpose.
 """
 
 from src.repository.base import SpRow
@@ -22,13 +26,14 @@ _COMPACT_MATERIAL_FIELDS = ("preset_material_id", "set_name", "set_price")
 
 
 class PresetFillingLoader:
-    """One per request: in the price route a section depends on the one built before it."""
+    """One per request: a section can depend on the sections and presets built before it."""
 
     def __init__(self, repository: PresetRepository, placement_uuid: str, *, compact: bool) -> None:
         self._repository = repository
         self._placement_uuid = placement_uuid
         self._compact = compact
         self._previous_section: SpRow = {}
+        self._last_work_set: SpRow | None = None
 
     async def load_sections(self, preset_kit_id: int) -> list[SpRow]:
         sections = await self._repository.render_filling_section_read(preset_kit_id)
@@ -36,13 +41,16 @@ class PresetFillingLoader:
         for section in sections:
             code = section["section_show_type_code"]
             section_id = section["section_id"]
-            if code in (_ROOM_WORK_SET, _ROOM):
-                head = self._section_head(section, code)
-                rooms = await self._load_rooms(preset_kit_id, section_id)
+            if code == _ROOM_WORK_SET:
+                head = self._section_head(section)
+                rooms = await self._load_rooms_with_work_sets(preset_kit_id, section_id)
                 built = {**head, "rooms": rooms}
+            elif code == _ROOM:
+                rooms = await self._load_rooms_with_materials(preset_kit_id, section_id)
+                built = {**section, "rooms": rooms}
             elif code == _WORK_SET:
-                work_sets = await self._load_work_sets(preset_kit_id, section_id, room_id=None)
-                built = {**section, "work_sets": work_sets}
+                await self._load_work_sets(preset_kit_id, section_id, room_id=None)
+                built = {**section, "work_sets": [self._last_work_set]}
             elif code in _PLAIN_SECTIONS:
                 materials = await self._load_materials(preset_kit_id, section_id, None, None)
                 built = {**section, "sets": materials}
@@ -52,15 +60,13 @@ class PresetFillingLoader:
             loaded.append(built)
         return loaded
 
-    def _section_head(self, section: SpRow, code: str) -> SpRow:
-        if self._compact and code == _ROOM_WORK_SET:
-            # PHP did not reset $additional here, so the previous section's fields stay in the
-            # response. BI Group gets the same fields as before.
-            fields = {field: section[field] for field in _COMPACT_SECTION_FIELDS}
-            return {**self._previous_section, **fields}
-        return section
+    def _section_head(self, section: SpRow) -> SpRow:
+        if not self._compact:
+            return section
+        fields = {field: section[field] for field in _COMPACT_SECTION_FIELDS}
+        return {**self._previous_section, **fields}
 
-    async def _load_rooms(self, preset_kit_id: int, section_id: int) -> list[SpRow]:
+    async def _load_rooms_with_work_sets(self, preset_kit_id: int, section_id: int) -> list[SpRow]:
         rooms = await self._repository.render_filling_room_read(
             self._placement_uuid,
             preset_kit_id,
@@ -78,6 +84,24 @@ class PresetFillingLoader:
             for room in rooms
         ]
 
+    async def _load_rooms_with_materials(self, preset_kit_id: int, section_id: int) -> list[SpRow]:
+        rooms = await self._repository.render_filling_room_read(
+            self._placement_uuid,
+            preset_kit_id,
+            section_id,
+        )
+        loaded: list[SpRow] = []
+        for room in rooms:
+            self._last_work_set = {**(self._last_work_set or {}), "sets": []}
+            materials = await self._load_materials(
+                preset_kit_id,
+                section_id,
+                room["room_id"],
+                work_set_id=None,
+            )
+            loaded.append({**room, "sets": materials})
+        return loaded
+
     async def _load_work_sets(
         self,
         preset_kit_id: int,
@@ -89,18 +113,17 @@ class PresetFillingLoader:
             section_id,
             room_id,
         )
-        return [
-            {
-                **work_set,
-                "sets": await self._load_materials(
-                    preset_kit_id,
-                    section_id,
-                    room_id,
-                    work_set["work_set_id"],
-                ),
-            }
-            for work_set in work_sets
-        ]
+        loaded: list[SpRow] = []
+        for work_set in work_sets:
+            materials = await self._load_materials(
+                preset_kit_id,
+                section_id,
+                room_id,
+                work_set["work_set_id"],
+            )
+            self._last_work_set = {**work_set, "sets": materials}
+            loaded.append(self._last_work_set)
+        return loaded
 
     async def _load_materials(
         self,

@@ -398,7 +398,7 @@ async def test_preset_list_returns_full_tree(client: AsyncClient, db: FakeConnec
                     "additional": [
                         {**_section(1), "rooms": [room]},
                         {**_section(2), "work_sets": work_sets},
-                        {**_section(3), "rooms": [room]},
+                        {**_section(3), "rooms": [{"room_id": 10, "sets": [DETAILED_MATERIAL]}]},
                         {**_section(4), "sets": [DETAILED_MATERIAL]},
                     ],
                     "renders": {
@@ -436,6 +436,88 @@ async def test_preset_price_route_keeps_php_leftover_section_fields(
     assert "section_extra" not in second
 
 
+def _only_sections(*sections: dict[str, Any]) -> dict[str, Any]:
+    return {**_preset_functions(), "rest.render_filling__section__read": list(sections)}
+
+
+@pytest.mark.parametrize("route", [LIST_ROUTE, PRESET_ROUTE])
+async def test_work_set_section_keeps_only_the_last_work_set(
+    client: AsyncClient, db: FakeConnection, route: str
+) -> None:
+    db.responses = {
+        **_only_sections(_section(2)),
+        "rest.render_filling__work_set_read": [{"work_set_id": 20}, {"work_set_id": 21}],
+    }
+
+    response = await client.post(
+        route,
+        json={"placementUUID": FLAT, "preset_id": 428},
+        headers=_auth(),
+    )
+
+    work_sets = response.json()["data"]["preset_list"][0]["additional"][0]["work_sets"]
+    assert [work_set["work_set_id"] for work_set in work_sets] == [21]
+
+
+async def test_work_set_section_without_rows_is_a_list_with_null(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    db.responses = {
+        **_only_sections(_section(2)),
+        "rest.render_filling__work_set_read": [],
+    }
+
+    response = await client.post(LIST_ROUTE, json={"placementUUID": FLAT}, headers=_auth())
+
+    assert response.json()["data"]["preset_list"][0]["additional"][0]["work_sets"] == [None]
+
+
+async def test_work_set_section_without_rows_repeats_the_earlier_work_set(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    def work_sets(args: tuple[Any, ...]) -> list[dict[str, int]]:
+        return [{"work_set_id": 20}] if args[2] == 10 else []
+
+    db.responses = {
+        **_only_sections(_section(1), _section(2)),
+        "rest.render_filling__work_set_read": work_sets,
+    }
+
+    response = await client.post(LIST_ROUTE, json={"placementUUID": FLAT}, headers=_auth())
+
+    second = response.json()["data"]["preset_list"][0]["additional"][1]
+    assert [work_set["work_set_id"] for work_set in second["work_sets"]] == [20]
+
+
+async def test_room_section_clears_the_sets_of_the_earlier_work_set(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    def work_sets(args: tuple[Any, ...]) -> list[dict[str, int]]:
+        return [{"work_set_id": 20}] if args[2] == 10 else []
+
+    db.responses = {
+        **_only_sections(_section(1), _section(3), _section(2)),
+        "rest.render_filling__work_set_read": work_sets,
+    }
+
+    response = await client.post(LIST_ROUTE, json={"placementUUID": FLAT}, headers=_auth())
+
+    assert response.json()["data"]["preset_list"][0]["additional"][2]["work_sets"] == [
+        {"work_set_id": 20, "sets": []},
+    ]
+
+
+async def test_room_section_reads_materials_of_the_room_without_work_sets(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    db.responses = _only_sections(_section(3))
+
+    await client.post(LIST_ROUTE, json={"placementUUID": FLAT}, headers=_auth())
+
+    assert ("rest.render_filling__material_set_read", (428, 3, 10, None, FLAT)) in db.calls
+    assert all(function != "rest.render_filling__work_set_read" for function, _ in db.calls)
+
+
 async def test_preset_price_route_returns_compact_tree(
     client: AsyncClient, db: FakeConnection
 ) -> None:
@@ -463,7 +545,7 @@ async def test_preset_price_route_returns_compact_tree(
                     "additional": [
                         {**compact_head, "rooms": [room]},
                         {**_section(2), "work_sets": work_sets},
-                        {**_section(3), "rooms": [room]},
+                        {**_section(3), "rooms": [{"room_id": 10, "sets": [COMPACT_MATERIAL]}]},
                         {**_section(4), "sets": [COMPACT_MATERIAL]},
                     ],
                 },
