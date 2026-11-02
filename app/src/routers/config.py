@@ -34,6 +34,10 @@ class APIShowroomPrefixConfig:
     prefix: str = "/showroom"
 
 
+class APIBuh1cPrefixConfig:
+    prefix: str = "/buh_1c"
+
+
 class APIPrefixConfig:
     prefix: str = "/api"
     v1: APIV1PrefixConfig = APIV1PrefixConfig()
@@ -44,6 +48,7 @@ class APIPrefixConfig:
     auto_sign: APIAutoSignPrefixConfig = APIAutoSignPrefixConfig()
     albato_meta: APIAlbatoMetaPrefixConfig = APIAlbatoMetaPrefixConfig()
     showroom: APIShowroomPrefixConfig = APIShowroomPrefixConfig()
+    buh_1c: APIBuh1cPrefixConfig = APIBuh1cPrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

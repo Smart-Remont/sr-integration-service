@@ -19,6 +19,7 @@ DESCRIPTION = (
     "в БД | JSON как в PHP |\n"
     "| Шоурумы для BI Group (перенос из PHP) | `/api/showroom/...` | Basic, вызывает крон "
     "| ответ BI Group как есть |\n"
+    "| Обмен с 1С (перенос из PHP) | `/api/buh_1c/...` | Basic, вызывает 1С | JSON как в PHP |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
 )
 
@@ -99,6 +100,14 @@ TAGS = [
         "description": (
             "Крон: список шоурумов из БД уходит POST в BI Group, ответ BI Group отдаётся вызвавшему "
             "как есть, код всегда 200. Вызов отправляет настоящие данные партнёру."
+        ),
+    },
+    {
+        "name": "1C exchange",
+        "description": (
+            "Обмен с 1С, перенос из PHP `RestController::buhAction`. Коды, заголовки и тела как в "
+            "PHP. Перенесены только живые `what`: `lot`, `lot_guid`, `material_guid`, "
+            "`warehouse_guid`. Остальные из PHP отвечают 410 и ничего не делают."
         ),
     },
     {

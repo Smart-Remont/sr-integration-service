@@ -11,6 +11,7 @@ from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
 from src.features.albato_meta.errors import register_albato_meta_handlers
 from src.features.big_integration.php_contract import register_big_integration_handlers
+from src.features.buh_1c.errors import register_buh_1c_handlers
 from src.features.kaspi.errors import register_kaspi_handlers
 from src.log_setup import configure_logging
 from src.openapi import DESCRIPTION, TAGS
@@ -41,6 +42,7 @@ register_infrastructure_handlers(app)
 register_big_integration_handlers(app)
 register_kaspi_handlers(app)
 register_albato_meta_handlers(app)
+register_buh_1c_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_config.allow_origins,

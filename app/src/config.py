@@ -57,6 +57,13 @@ class AutoSignCronAuthConfig:
     password: str = os.getenv("AUTO_SIGN_CRON_PASSWORD", "")
 
 
+class Buh1cAuthConfig:
+    """Basic auth of 1C for /api/buh_1c/*, the login written in PHP ``buhAction``. Empty: 503."""
+
+    username: str = os.getenv("BUH_1C_USER", "")
+    password: str = os.getenv("BUH_1C_PASSWORD", "")
+
+
 class ShowroomCronAuthConfig:
     """Basic auth of the crontab wget line for /api/showroom/*. Empty: 503."""
 
@@ -287,6 +294,7 @@ big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
 sms_cron_auth_config = SmsCronAuthConfig()
 auto_sign_cron_auth_config = AutoSignCronAuthConfig()
+buh_1c_auth_config = Buh1cAuthConfig()
 showroom_cron_auth_config = ShowroomCronAuthConfig()
 showroom_config = ShowroomConfig()
 auto_sign_config = AutoSignConfig()

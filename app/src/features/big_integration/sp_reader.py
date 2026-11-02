@@ -2,6 +2,7 @@ from collections.abc import Sequence
 
 from src.php_compat.pdo_errors import php_error_text
 from src.php_compat.pdo_values import libpq_c_string, pg_row
+from src.php_compat.session_plans import plan_like_a_new_php_session
 from src.repository import BaseRepository, scalar_from_sp_rows
 from src.repository.base import SpRow, SpRows
 
@@ -18,18 +19,9 @@ class BigIntegrationSpReader(BaseRepository):
     _custom_plans_set = False
 
     async def _plan_like_a_new_session(self) -> None:
-        """PHP opened a session per request, so a query got custom plans for its first five runs.
-
-        A pooled session stays on a generic plan once it has moved to one, and a function without
-        ORDER BY then returns its rows in another order: ``rest.ddu_request_info`` gave BI Group
-        the other request of a deal. Not exact: PHP does go generic on a sixth run within a
-        request. See contour/compare/RESULTS.md.
-        """
         if self._custom_plans_set:
             return
-        await self.connection.fetchval(
-            "select set_config('plan_cache_mode', 'force_custom_plan', true)",
-        )
+        await plan_like_a_new_php_session(self.connection)
         self._custom_plans_set = True
 
     async def read_rows(self, function: str, *args: object) -> SpRows:
