@@ -9,7 +9,7 @@ import httpx
 from asyncpg.exceptions import InFailedSQLTransactionError
 
 from src.config import ClientSignConfig
-from src.features.client_sign.client import DocumentFetcher, MyncaClient
+from src.features.client_sign.client import DocumentFetcher
 from src.features.client_sign.deps import (
     get_client_sign_config,
     get_client_sign_database,
@@ -18,6 +18,7 @@ from src.features.client_sign.deps import (
 )
 from src.features.client_sign.repo import ClientSignDatabase
 from src.main import app
+from src.shared.mynca_client import MyncaClient
 
 CONFIG = ClientSignConfig(
     mynca_base_url="https://mynca.test/api",

@@ -13,8 +13,9 @@ from loguru import logger
 
 from src.config import ClientSignConfig
 from src.php_compat.text import php_html_escape, php_is_truthy, php_string
+from src.shared.mynca_client import MyncaAnswer, MyncaClient
 
-from .client import DocumentFetcher, MyncaAnswer, MyncaClient
+from .client import DocumentFetcher
 from .doc_types import AGREEMENT_MANUAL, DocumentType
 from .documents import DocumentSource, document_id, signed_file_name
 from .errors import ClientSignDatabaseError, ClientSignError

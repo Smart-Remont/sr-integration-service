@@ -1,18 +1,13 @@
-import hashlib
-
 from asyncpg.transaction import Transaction
 
 from src.php_compat.pdo_values import pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRows, scalar_from_sp_rows
+from src.shared.advisory_lock import advisory_lock_key
 
 # PHP sets no module for these calls.
 _MODULE_CODE = ""
-_SEND_RUN_LOCK_KEY = int.from_bytes(
-    hashlib.sha256(b"sms:sms-notify").digest()[:8],
-    "big",
-    signed=True,
-)
+_SEND_RUN_LOCK_KEY = advisory_lock_key("sms:sms-notify")
 
 
 class SmsRepository(BaseRepository):

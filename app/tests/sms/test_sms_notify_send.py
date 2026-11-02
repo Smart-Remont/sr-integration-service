@@ -6,7 +6,7 @@ import httpx
 import pytest
 from httpx import AsyncClient
 
-from src.features.sms import limits
+from src.shared import cron_run as limits
 from tests.sms.fakes import (
     ACCEPTED,
     LOCK,

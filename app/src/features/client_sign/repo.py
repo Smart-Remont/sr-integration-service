@@ -1,4 +1,3 @@
-import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 
 from asyncpg import InterfaceError, Pool, PostgresError
@@ -7,6 +6,7 @@ from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
 from src.php_compat.text import zero_to_null
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
+from src.shared.advisory_lock import advisory_lock_key
 
 from .doc_types import DocumentType
 from .errors import ClientSignDatabaseError
@@ -149,8 +149,7 @@ class ClientSignDatabase:
 
 def sign_process_lock_key(sign_process_id: str) -> int:
     """The signed 64-bit key of ``pg_advisory_xact_lock``."""
-    text = f"{_LOCK_KEY_PREFIX}{sign_process_id}".encode("utf-8", "surrogateescape")
-    return int.from_bytes(hashlib.sha256(text).digest()[:8], "big", signed=True)
+    return advisory_lock_key(f"{_LOCK_KEY_PREFIX}{sign_process_id}")
 
 
 def _invalid_encoding_error(pdo_message: str) -> ClientSignDatabaseError:

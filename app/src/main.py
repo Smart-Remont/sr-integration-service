@@ -11,8 +11,11 @@ from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
 from src.features.big_integration.php_contract import register_big_integration_handlers
 from src.features.kaspi.errors import register_kaspi_handlers
+from src.log_setup import configure_logging
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
+
+configure_logging()
 
 
 @asynccontextmanager

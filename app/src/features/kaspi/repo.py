@@ -1,4 +1,3 @@
-import hashlib
 from collections.abc import Sequence
 
 from asyncpg.transaction import Transaction
@@ -6,6 +5,7 @@ from asyncpg.transaction import Transaction
 from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
+from src.shared.advisory_lock import advisory_lock_key
 
 from .errors import KaspiDatabaseError
 from .params import KaspiLogEntry
@@ -117,5 +117,4 @@ class KaspiRepository(BaseRepository):
 
 def account_lock_key(account: str) -> int:
     """The signed 64-bit key of ``pg_advisory_xact_lock``."""
-    text = f"{_LOCK_KEY_PREFIX}{account}".encode("utf-8", "surrogateescape")
-    return int.from_bytes(hashlib.sha256(text).digest()[:8], "big", signed=True)
+    return advisory_lock_key(f"{_LOCK_KEY_PREFIX}{account}")

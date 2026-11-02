@@ -5,9 +5,10 @@ from fastapi import Depends
 
 from src.config import ClientSignConfig, client_sign_config
 from src.database.pool import get_db_pool
+from src.shared.mynca_client import MyncaClient
 
 from .callback import SignCallbackService
-from .client import DocumentFetcher, MyncaClient
+from .client import DocumentFetcher
 from .document_list import DocumentListService
 from .documents import DocumentSource
 from .downloads import DownloadService

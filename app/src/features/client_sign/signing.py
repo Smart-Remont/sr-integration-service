@@ -8,9 +8,9 @@ from loguru import logger
 
 from src.config import ClientSignConfig
 from src.php_compat.text import php_html_escape, php_int, php_is_truthy, php_string
+from src.shared.mynca_client import MyncaAnswer, MyncaClient
 
 from .callback_key import callback_key
-from .client import MyncaAnswer, MyncaClient
 from .doc_types import ID_COLUMN_BY_DOCUMENT, SIGN_TYPE_BY_DOCUMENT, DocumentType
 from .documents import DocumentSource, signed_file_name
 from .errors import ClientSignDatabaseError, ClientSignError

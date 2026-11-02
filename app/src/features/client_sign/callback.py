@@ -1,6 +1,5 @@
 """``ClientSignController::callbackAction``: MyNCA reports a signature, and it is recorded once."""
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +9,7 @@ from loguru import logger
 from src.php_compat.json_codec import php_json_decode
 from src.php_compat.text import php_int, php_is_positive, php_string, php_strtoupper
 from src.php_compat.zend_request import PhpParam
+from src.shared.uuid_text import is_uuid_text
 
 from .callback_key import is_callback_key_valid
 from .doc_types import DocumentType, SignTypeCode
@@ -21,9 +21,6 @@ _SIGNED_STATUS = "SUCCESS"
 _UNPROCESSABLE = 422
 _CONFLICT = 409
 _FORBIDDEN = 403
-# Stricter than the uuid type on purpose: this is the form MyNCA sends, and a value that passes
-# here can never fail in client.sign_tab__modify after the signature row exists.
-_UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 # How client.insert_sign_general stores a report. A second signer of a CLIENT_CHANGE DS comes in as
 # CLIENT_DS_SIGN and the function records it as CLIENT_DS_SIGN_SECOND.
 _STORED_AS = {
@@ -207,14 +204,14 @@ def _is_same_document(report: SignatureReport, stored: dict[str, Any]) -> bool:
 
 def _require_uuids(report: SignatureReport) -> None:
     """Before any write. MyNCA sends UUIDs, so anything else is refused rather than half stored."""
-    if not _is_uuid(report.sign_process_id):
+    if not is_uuid_text(report.sign_process_id):
         raise CallbackRefused(
             "sign_process_id не UUID",
             reason="invalid_process_id",
             status_code=_UNPROCESSABLE,
             report=report,
         )
-    if report.sign_group_id is not None and not _is_uuid(report.sign_group_id):
+    if report.sign_group_id is not None and not is_uuid_text(report.sign_group_id):
         raise CallbackRefused(
             "group_id не UUID",
             reason="invalid_group_id",
@@ -264,11 +261,7 @@ def _log_refusal(refusal: CallbackRefused) -> None:
 
 def _loggable_process(value: str) -> str:
     # The value comes from the body and any caller can send text there, a signer's IIN included.
-    return value if _is_uuid(value) else "not-a-uuid"
-
-
-def _is_uuid(value: str) -> bool:
-    return _UUID_TEXT.fullmatch(value) is not None
+    return value if is_uuid_text(value) else "not-a-uuid"
 
 
 def _accepted() -> Response:

@@ -29,9 +29,9 @@ from src.php_compat.json_codec import (
 from src.php_compat.pdo_values import pdo_text
 from src.php_compat.text import zero_to_null
 from src.repository.base import SpRow
+from src.shared.cron_run import database_step_limit
 
 from .client import KcellClient, KcellRequestError
-from .limits import database_step_limit
 from .repo import SmsRepository
 from .responses import (
     DONE_TEXT,

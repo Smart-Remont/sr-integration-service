@@ -50,6 +50,38 @@ class SmsCronAuthConfig:
     password: str = os.getenv("SMS_CRON_PASSWORD", "")
 
 
+class AutoSignCronAuthConfig:
+    """Basic auth of the crontab wget lines for /api/auto_sign/*. Empty: 503."""
+
+    username: str = os.getenv("AUTO_SIGN_CRON_USER", "")
+    password: str = os.getenv("AUTO_SIGN_CRON_PASSWORD", "")
+
+
+class AutoSignConfig:
+    """Crons of company signing. Empty by default, so a stand without them signs nothing: 503.
+
+    Its own variables: MYNCA_BASE_URL has a production default, and NCA_MASTER_KEY is set wherever
+    cession signing is, which must not arm this cron by itself.
+    """
+
+    mynca_base_url: str = _url_env("AUTO_SIGN_MYNCA_BASE_URL")
+    mynca_token: str = os.getenv("AUTO_SIGN_MYNCA_TOKEN", "").strip()
+    # Decrypts nca.company_key_store_tab. In PHP: constants.master_key.
+    master_key: str = os.getenv("AUTO_SIGN_MASTER_KEY", "")
+    # Partner backend, includes /partner. pdf-find-sum reads signed agreements from it.
+    partner_url: str = _url_env("AUTO_SIGN_PARTNER_URL")
+
+    @property
+    def signing_is_configured(self) -> bool:
+        # A stand given real values by mistake must not put the company signature on anything.
+        return app_config.env == "prod" and self.upload_is_configured and bool(self.master_key)
+
+    @property
+    def upload_is_configured(self) -> bool:
+        # The token and the company key travel to this address.
+        return self.mynca_base_url.startswith("https://") and bool(self.mynca_token)
+
+
 class KcellConfig:
     """Sending and status reads are separate Kcell addresses with separate passwords. Empty: 503."""
 
@@ -243,6 +275,8 @@ cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
 sms_cron_auth_config = SmsCronAuthConfig()
+auto_sign_cron_auth_config = AutoSignCronAuthConfig()
+auto_sign_config = AutoSignConfig()
 kcell_config = KcellConfig()
 client_sign_config = ClientSignConfig.from_env()
 installment_auth_config = InstallmentAuthConfig()
