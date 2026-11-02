@@ -550,6 +550,7 @@ class FactoringService:
             credit_contract=application.credit_contract,
             branch_code=application.branch_code or "200000",
             product_id=product_id,
+            prepayment_amount=application.prepayment_amount,
             is_knox=request.is_knox,
         )
         reference_id = str(application.id)
@@ -1894,9 +1895,8 @@ class FactoringService:
         credit_params: dict[str, Any] = {
             "period": request.period,
             "principal": float(request.principal),
+            "prepayment_amount": float(request.prepayment_amount or 0),
         }
-        if request.prepayment_amount is not None:
-            credit_params["prepayment_amount"] = float(request.prepayment_amount)
         if request.interest_rate is not None:
             credit_params["interest_rate"] = float(request.interest_rate)
 
@@ -1923,9 +1923,20 @@ class FactoringService:
                 "reference_id": reference_id,
             },
             "reference_id": reference_id,
+            # По документации поле необязательное, но банк просит его передавать.
+            # CRM товары не присылает, поэтому одна позиция на всю сумму.
+            "credit_goods": credit_goods
+            or [
+                {
+                    "cost": float(request.principal),
+                    "good_identifier": str(request.client_request_id),
+                    "quantity": 1,
+                    "brand": "Smart Remont",
+                    "model": "Ремонт квартиры",
+                    "category": "Ремонт",
+                }
+            ],
         }
-        if credit_goods:
-            payload["credit_goods"] = credit_goods
         return payload
 
     @staticmethod
