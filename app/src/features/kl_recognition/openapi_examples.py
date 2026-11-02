@@ -21,6 +21,12 @@ RECOGNIZE_RECOGNIZED = {
             "room_id": 2,
             "system_name": "Кухня",
             "merged_from": [{"name": "Кухня", "area": 11.19}, {"name": "Кладовая", "area": 3.16}],
+            "neighbors": {
+                "left": [{"name": "Гостиная", "area": 20.85, "room_id": 1}],
+                "right": [],
+                "up": [],
+                "down": [{"name": "Лоджия", "area": 3.08, "room_id": 20}],
+            },
         },
         {
             "name": "Гардероб",
