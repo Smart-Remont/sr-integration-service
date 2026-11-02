@@ -33,7 +33,8 @@ TAGS = [
             "JSON без Pydantic, проверки в функции БД. Ответ — конверт "
             '`{"data", "response", "error"}`: `data` — первая строка refcursor как есть, ошибка '
             "функции БД — HTTP 500 и `error.message`. Контракт заморожен: "
-            "`app/tests/big_integration/`."
+            "`app/tests/big_integration/`. Маршруты, перенесённые из PHP позже, отдают numeric и "
+            "даты текстом, как PHP."
         ),
     },
     {

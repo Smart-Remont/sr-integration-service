@@ -21,6 +21,8 @@ nginx `office.smartremont.kz` (PHP) отправляет сюда только �
 
 Не меняются: HTTP-коды, ключи конверта `{data, response, error}`, тексты ошибок, типы значений (`Decimal` → число, дата → ISO-строка). Всё это закреплено в `app/tests/big_integration/test_contract.py` и `app/tests/test_app.py`; эти тесты проходят и на коде `main`. Упавший тест здесь означает поломку у BI Group, а не повод поправить тест. Новый маршрут BIG добавляется отдельной папкой и не меняет общие `responses.py`, `http.py`, `errors.py`.
 
+Маршруты, перенесённые из PHP позже, ещё не заведены в nginx; список и порядок — `../myspace/features/legacy-integrations/STATUS.md`. Они отдают значения как PHP (`src/shared/php_json.py`: numeric и даты текстом), а ошибки поднимают исключением (`features/big_integration/php_contract.py`), чтобы транзакция откатилась. Новые маршруты, переносимые из PHP, строятся так же.
+
 ## Ветки
 
 - `main` — бой. В `main` только через PR.

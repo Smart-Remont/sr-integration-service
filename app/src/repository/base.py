@@ -10,11 +10,8 @@ from src.exceptions import map_asyncpg_errors
 
 type SpRow = dict[str, object]
 type SpRows = list[SpRow]
-type SpMultiResult = dict[str, SpRows]
-type SpResult = SpRows | SpMultiResult
 
 _FUNCTION_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
-_CURSOR_PLACEHOLDER_RE = re.compile(r"^@cur\d*$")
 
 
 def scalar_from_sp_rows(rows: SpRows) -> object | None:
@@ -58,48 +55,28 @@ class BaseRepository:
         cursor: bool = False,
         session_user_id: int | None = None,
         module_code: str = "MYSPACE",
-    ) -> SpResult:
+    ) -> SpRows:
         """
         Call a PostgreSQL stored function.
 
         - Pass arguments directly: call_sp("public.fn", id)
-        - For refcursor reads use cursor=True or pass "@cur"
+        - A function that opens a refcursor as its first argument: cursor=True
         """
         self._validate_function_name(method)
 
-        call_args = list(args)
-        if cursor and not any(self._is_cursor_placeholder(arg) for arg in call_args):
-            call_args.insert(0, "@cur")
-
-        unique_suffix = uuid.uuid4().hex[:8]
-        bound_args: list[object] = []
-        cursor_names: list[str] = []
-        for arg in call_args:
-            if self._is_cursor_placeholder(arg):
-                cursor_name = self._resolve_cursor_placeholder(arg, unique_suffix)
-                bound_args.append(cursor_name)
-                cursor_names.append(cursor_name)
-            else:
-                bound_args.append(arg)
-
+        cursor_name = f"cur_{uuid.uuid4().hex[:8]}" if cursor else None
+        bound_args = [cursor_name, *args] if cursor_name else list(args)
         query = self._build_select_function_sql(method, len(bound_args))
 
         with map_asyncpg_errors():
             await self._set_db_session(session_user_id, module_code)
 
-            if not cursor_names:
+            if cursor_name is None:
                 rows = await self.connection.fetch(query, *bound_args)
                 return self._rows_to_dicts(rows)
 
             await self.connection.execute(query, *bound_args)
-
-            if len(cursor_names) == 1:
-                return await self._fetch_refcursor(cursor_names[0])
-
-            return {
-                f"data_{index}": await self._fetch_refcursor(name)
-                for index, name in enumerate(cursor_names, start=1)
-            }
+            return await self._fetch_refcursor(cursor_name)
 
     async def _set_db_session(
         self,
@@ -134,16 +111,6 @@ class BaseRepository:
     def _validate_function_name(method: str) -> None:
         if not _FUNCTION_NAME_RE.fullmatch(method):
             raise ValueError(f"Invalid stored function name: {method}")
-
-    @staticmethod
-    def _resolve_cursor_placeholder(arg: str, unique_suffix: str) -> str:
-        if not _CURSOR_PLACEHOLDER_RE.fullmatch(arg):
-            raise ValueError(f"Invalid refcursor argument: {arg}")
-        return f"{arg}_{unique_suffix}"
-
-    @staticmethod
-    def _is_cursor_placeholder(arg: object) -> bool:
-        return isinstance(arg, str) and arg.startswith("@cur")
 
     @staticmethod
     def _rows_to_dicts(rows: Sequence[Record]) -> SpRows:
