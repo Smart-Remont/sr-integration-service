@@ -157,3 +157,12 @@ def test_raised_text_is_found_in_the_message() -> None:
     assert php_error_text(RaiseError("{Отказ}")) == "Отказ"
     assert not is_php_unhandled_error("Отказ")
     assert is_php_unhandled_error(php_clean_error("SQLSTATE[42703]: x"))
+
+
+def test_pdo_state_name_of_a_too_long_value_has_its_comma() -> None:
+    # pdo_sqlstate.c names it so, and Kaspi writes this text into its log row.
+    error = _server_error(C="22001", M="value too long for type character varying(255)")
+
+    assert php_pdo_message(error).startswith(
+        "SQLSTATE[22001]: String data, right truncated: 7 ERROR:  value too long"
+    )

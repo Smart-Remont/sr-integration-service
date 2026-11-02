@@ -30,6 +30,11 @@ def pdo_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
+def libpq_c_string(value: str) -> str:
+    """libpq takes a C string: a bound value ends at the first NUL byte."""
+    return value.partition("\0")[0]
+
+
 def pdo_bound_text(
     value: str | None,
     invalid_encoding: Callable[[str], Exception],
@@ -37,8 +42,7 @@ def pdo_bound_text(
     """A text parameter as libpq takes it. ``invalid_encoding`` gets the PDO message of a refusal."""
     if value is None:
         return None
-    # libpq takes a C string: the value ends at the first NUL byte.
-    text = value.partition("\0")[0]
+    text = libpq_c_string(value)
     message = php_invalid_encoding_message(text)
     if message:
         raise invalid_encoding(message)

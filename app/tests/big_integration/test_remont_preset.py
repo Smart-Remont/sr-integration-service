@@ -1,6 +1,5 @@
 """``remont-preset-list-v2`` and ``remont-preset``, moved from PHP."""
 
-import json
 from decimal import Decimal
 from typing import Any
 
@@ -107,7 +106,7 @@ async def test_preset_list_returns_full_tree(client: AsyncClient, db: FakeConnec
             ],
         },
     )
-    assert db.calls[0] == ("rest.ddu__preset_list_v2", (json.dumps({"placementUUID": FLAT}),))
+    assert db.calls[0] == ("rest.ddu__preset_list_v2", (f'{{"placementUUID":"{FLAT}"}}',))
     assert ("rest.render_set_photo__read", (60,)) in db.calls
 
 
@@ -310,3 +309,53 @@ async def test_placement_scalar_is_bound_as_php_text(
     await client.post(LIST_ROUTE, json={"placementUUID": value}, headers=_auth())
 
     assert ("rest.render_plan_room__read", (bound,)) in db.calls
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"\xef\xbb\xbf" + f'{{"placementUUID":"{FLAT}"}}'.encode(),
+        f'{{"placementUUID":"{FLAT}","x":"\\ud83d"}}'.encode(),
+        f'{{"placementUUID":"{FLAT}"}}'.encode("utf-16"),
+        f'{{"placementUUID":"{FLAT}","x":NaN}}'.encode(),
+        f'{{"placementUUID":"{FLAT}","x":{"[" * 511}{"]" * 511}}}'.encode(),
+    ],
+)
+async def test_json_php_refuses_is_an_empty_placement(
+    client: AsyncClient, db: FakeConnection, body: bytes
+) -> None:
+    response = await client.post(LIST_ROUTE, content=body, headers=_auth())
+
+    assert response.status_code == 400
+    assert "ГУИД помещения" in response.json()["error"]["message"]
+    assert db.calls == []
+
+
+@pytest.mark.parametrize(
+    ("extra", "sent"),
+    [
+        ("1.0", "1"),
+        ("1e3", "1000"),
+        ("2.50", "2.5"),
+        ("12345678901234567890", "1.2345678901234567e+19"),
+        ('"a/b"', '"a\\/b"'),
+        ('"кир"', '"\\u043a\\u0438\\u0440"'),
+    ],
+)
+async def test_function_gets_the_text_json_encode_made(
+    client: AsyncClient, db: FakeConnection, extra: str, sent: str
+) -> None:
+    # The function logs this text, and its database errors quote it.
+    db.responses = {"rest.ddu__preset_list_v2": [], "rest.render_plan_room__read": []}
+
+    response = await client.post(
+        LIST_ROUTE,
+        content=f'{{"placementUUID":"{FLAT}","x":{extra}}}'.encode(),
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    assert db.calls[0] == (
+        "rest.ddu__preset_list_v2",
+        (f'{{"placementUUID":"{FLAT}","x":{sent}}}',),
+    )

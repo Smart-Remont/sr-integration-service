@@ -37,6 +37,50 @@ async def test_request_lookup_passes_empty_keys_as_null(
     assert db.calls == [(function, (None, None, "318796"))]
 
 
+async def test_value_with_nul_byte_ends_at_it_as_in_libpq(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    db.responses = {"rest.ddu_request_info": []}
+
+    response = await client.get(
+        _url("request-info"), params={"order_id": "ab\0cd"}, headers=_auth()
+    )
+
+    assert response.status_code == 200
+    assert db.calls == [("rest.ddu_request_info", (None, None, "ab"))]
+
+
+async def test_client_request_id_with_nul_byte_ends_at_it_as_in_libpq(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    db.responses = {"rest.ddu_request_info_by_client_request": []}
+
+    response = await client.get(
+        _url("ddu-request-info"), params={"client_request_id": "42\0x"}, headers=_auth()
+    )
+
+    assert response.status_code == 200
+    assert db.calls == [("rest.ddu_request_info_by_client_request", (42,))]
+
+
+async def test_functions_run_on_custom_plans_as_in_a_new_php_session(
+    client: AsyncClient, db: FakeConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On a generic plan rest.ddu_request_info returned the other request of a deal with two.
+    queries: list[str] = []
+
+    async def record(query: str, *args: object) -> None:
+        queries.append(query)
+
+    monkeypatch.setattr(db, "fetchval", record)
+    db.responses = {"rest.ddu_request_info": []}
+
+    response = await client.get(_url("request-info"), params={"deal_id": "1"}, headers=_auth())
+
+    assert response.status_code == 200
+    assert queries.count("select set_config('plan_cache_mode', 'force_custom_plan', true)") == 1
+
+
 async def test_lookup_without_row_returns_null_data(
     client: AsyncClient, db: FakeConnection
 ) -> None:

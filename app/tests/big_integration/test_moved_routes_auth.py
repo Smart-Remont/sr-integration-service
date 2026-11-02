@@ -27,3 +27,14 @@ async def test_route_requires_basic_auth(client: AsyncClient, method: str, route
         assert response.content == b""
         assert response.headers["www-authenticate"] == 'Basic realm="Access denied"'
         assert response.headers["content-type"] == "text/html; charset=UTF-8"
+
+
+async def test_lowercase_basic_scheme_is_refused_as_in_php(client: AsyncClient) -> None:
+    # Production PHP 7.4 sets PHP_AUTH_USER only for the exact "Basic " prefix.
+    good = _auth()["Authorization"]
+    headers = {"Authorization": good.replace("Basic ", "basic ", 1)}
+
+    response = await client.get(_url("request-info"), headers=headers)
+
+    assert response.status_code == 401
+    assert response.content == b""

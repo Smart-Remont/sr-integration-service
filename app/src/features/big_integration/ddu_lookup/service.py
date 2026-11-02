@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from fastapi import Response, status
 
 from src.php_compat.pdo_errors import php_pdo_error_text
+from src.php_compat.pdo_values import libpq_c_string
 from src.php_compat.text import zero_to_null
 
 from ..php_contract import BigIntegrationRequestError, php_success_response
@@ -55,6 +56,7 @@ def _client_request_id(value: str) -> int | None:
     text = zero_to_null(value)
     if text is None:
         return None
+    text = libpq_c_string(text)
     # PHP sent the text to PostgreSQL; asyncpg needs a number, so the cast errors are made here.
     if not _INTEGER.fullmatch(text):
         raise _cast_error(

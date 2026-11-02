@@ -99,7 +99,8 @@ async def _require_php_basic_auth(request: Request) -> None:
         credentials = await _http_basic(request)
     except HTTPException as exc:
         raise BigIntegrationUnauthorizedError from exc
-    if credentials is None:
+    # PHP fills PHP_AUTH_USER only for this exact prefix, FastAPI ignores the case of the scheme.
+    if credentials is None or not request.headers.get("authorization", "").startswith("Basic "):
         raise BigIntegrationUnauthorizedError
     try:
         verify_basic_credentials(

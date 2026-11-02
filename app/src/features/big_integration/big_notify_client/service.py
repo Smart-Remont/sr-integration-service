@@ -4,13 +4,16 @@ from fastapi import Response, status
 from loguru import logger
 
 from src.php_compat.json_codec import php_json_encode_pretty
-from src.php_compat.pdo_errors import php_pdo_error_text
+from src.php_compat.pdo_errors import php_clean_error
+from src.php_compat.pdo_values import pdo_bound_text
 
 from ..errors import BigIntegrationDatabaseError
 from ..php_contract import BigIntegrationRequestError, php_response
 
 if TYPE_CHECKING:
     from .repo import BigNotifyClientRepository
+
+_PHP_TRIM_BYTES = b" \t\n\r\0\x0b"
 
 
 class BigNotifyClientError(BigIntegrationRequestError):
@@ -43,15 +46,11 @@ class BigNotifyClientService:
 
 
 def _body_text(raw_body: bytes) -> str:
-    try:
-        return raw_body.decode()
-    except UnicodeDecodeError as exc:
-        # PHP sent the bytes as they were and PostgreSQL refused them with this error.
-        byte = raw_body[exc.start]
-        raise BigNotifyClientError(
-            php_pdo_error_text(
-                "22021",
-                "Character not in repertoire",
-                f'invalid byte sequence for encoding "UTF8": 0x{byte:02x}',
-            ),
-        ) from exc
+    """The text PDO bound: ``getRawBody`` gives ``false`` for a blank body, which PDO sends as ''."""
+    if not raw_body.strip(_PHP_TRIM_BYTES):
+        return ""
+    text = pdo_bound_text(
+        raw_body.decode("utf-8", "surrogateescape"),
+        lambda pdo_message: BigNotifyClientError(php_clean_error(pdo_message)),
+    )
+    return text or ""

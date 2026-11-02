@@ -1,5 +1,4 @@
-import json
-
+from src.php_compat.json_codec import php_json_encode_default
 from src.repository.base import SpRows
 
 from ..sp_reader import BigIntegrationSpReader
@@ -7,7 +6,7 @@ from ..sp_reader import BigIntegrationSpReader
 
 class PresetRepository(BigIntegrationSpReader):
     async def ddu_preset_list_v2(self, payload: dict[str, object]) -> SpRows:
-        return await self.read_rows("rest.ddu__preset_list_v2", json.dumps(payload))
+        return await self.read_rows("rest.ddu__preset_list_v2", php_json_encode_default(payload))
 
     async def render_plan_room_read(self, flat_guid: str) -> SpRows:
         return await self.read_rows("rest.render_plan_room__read", flat_guid)

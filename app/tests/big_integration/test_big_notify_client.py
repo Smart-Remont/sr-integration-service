@@ -91,3 +91,55 @@ async def test_notify_rejects_other_methods_with_its_own_envelope(client: AsyncC
 
     assert response.status_code == 400
     assert response.json()["error"] == {"code": 400, "message": "Неподдерживаемый метод"}
+
+
+@pytest.mark.parametrize("body", [b"", b"   ", b" \t\r\n", b"\x00", b"\x0b "])
+async def test_blank_body_reaches_the_function_as_empty_text(
+    client: AsyncClient, db: FakeConnection, body: bytes
+) -> None:
+    # Zend getRawBody gives false for a blank body and PDO sends that as an empty string.
+    db.responses = {"rest.big_notify_client": lambda args: [{"value": "OK"}]}
+
+    response = await client.post(_url("big-notify-client"), content=body, headers=_auth())
+
+    assert response.status_code == 200
+    assert db.calls == [("rest.big_notify_client", ("",))]
+
+
+@pytest.mark.parametrize(
+    ("body", "shown"),
+    [
+        (b'{"a":"\xc3"}', "0xc3 0x22"),
+        (b"\xe2\x28\xa1", "0xe2 0x28 0xa1"),
+        (b"\xff", "0xff"),
+        (b"\xc3", "0xc3"),
+    ],
+)
+async def test_invalid_utf8_shows_the_bytes_postgresql_shows(
+    client: AsyncClient, db: FakeConnection, body: bytes, shown: str
+) -> None:
+    response = await client.post(_url("big-notify-client"), content=body, headers=_auth())
+
+    assert response.status_code == 400
+    message = response.json()["error"]["message"]
+    assert message.startswith("Произошла необработанная ошибка в БД SQLSTATE[22021]")
+    assert message.endswith(f'invalid byte sequence for encoding "UTF8": {shown}')
+    assert db.calls == []
+
+
+async def test_notify_runs_on_custom_plans_as_in_a_new_php_session(
+    client: AsyncClient, db: FakeConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On a generic plan a too long name fails after the sequence moved, on a custom one before it.
+    queries: list[str] = []
+
+    async def record(query: str, *args: object) -> None:
+        queries.append(query)
+
+    monkeypatch.setattr(db, "fetchval", record)
+    db.responses = {"rest.big_notify_client": lambda args: [{"value": "OK"}]}
+
+    response = await client.post(_url("big-notify-client"), content=b"{}", headers=_auth())
+
+    assert response.status_code == 200
+    assert "select set_config('plan_cache_mode', 'force_custom_plan', true)" in queries

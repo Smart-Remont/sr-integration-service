@@ -10,7 +10,7 @@ _RAISED_TEXT = re.compile(r"\{[^@]*\}")
 _WORD_START = re.compile(r"(?<!^)(?=[A-Z])")
 _UNHANDLED_PREFIX = "Произошла необработанная ошибка в БД "
 # PDO names the state by its standard text; for these the asyncpg class name is not the same.
-_STATE_NAMES = {"P0001": "Raise exception"}
+_STATE_NAMES = {"P0001": "Raise exception", "22001": "String data, right truncated"}
 _DISPLAY_WIDTH = 60
 _MIN_RIGHT_CUT = 10
 

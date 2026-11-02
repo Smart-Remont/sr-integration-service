@@ -4,7 +4,12 @@ from uuid import UUID
 
 import pytest
 
-from src.php_compat.json_codec import php_json_decode, php_json_encode, php_json_encode_pretty
+from src.php_compat.json_codec import (
+    php_json_decode,
+    php_json_encode,
+    php_json_encode_default,
+    php_json_encode_pretty,
+)
 from src.php_compat.pdo_values import pg_row
 
 
@@ -65,3 +70,55 @@ def test_pretty_keeps_slashes_and_empty_containers() -> None:
     assert php_json_encode_pretty({"a": "б/в", "d": {}}) == (
         '{\n    "a": "б/в",\n    "d": {}\n}'.encode()
     )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        b"\xef\xbb\xbf{}",
+        '"\\ud83d"',
+        '"\\udc00"',
+        '{"\\ud83d": 1}',
+        "NaN",
+        "Infinity",
+        "[" * 512 + "]" * 512,
+        "[" * 100000,
+        "{}".encode("utf-16"),
+        b'"\xff"',
+    ],
+)
+def test_php_json_decode_refuses_what_php_refuses(text: str | bytes) -> None:
+    assert php_json_decode(text) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('"\\ud83d\\ude00"', "\U0001f600"),
+        ("[" * 511 + "]" * 511, None),
+        ("9223372036854775807", 9223372036854775807),
+        ("9223372036854775808", 9.223372036854775808e18),
+    ],
+)
+def test_php_json_decode_accepts_what_php_accepts(text: str, expected: object) -> None:
+    value = php_json_decode(text)
+    assert value is not None
+    if expected is not None:
+        assert value == expected
+        assert type(value) is type(expected)
+
+
+@pytest.mark.parametrize(
+    ("value", "encoded"),
+    [
+        (1.0, "1"),
+        (-0.0, "0"),
+        (1.5, "1.5"),
+        (1e15, "1000000000000000"),
+        ([1.0, {"a": 2.5}], '[1,{"a":2.5}]'),
+        (float("inf"), ""),
+        (float("nan"), ""),
+    ],
+)
+def test_php_json_encode_default_numbers(value: object, encoded: str) -> None:
+    assert php_json_encode_default(value) == encoded
