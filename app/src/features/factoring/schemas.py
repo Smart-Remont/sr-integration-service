@@ -39,7 +39,10 @@ class PrepareFactoringDocumentsRequest(BaseSchema):
     period: int = Field(examples=[12])
     created_by: int = Field(examples=[42])
     client_fio: str | None = Field(default=None, description="ФИО клиента для печатных форм")
-    branch_code: str = Field(default="200000")
+    branch_code: str = Field(
+        default="200000",
+        description="Запасной филиал: основной берётся из банка (branch-code-info).",
+    )
     product_id: str | None = None
     prepayment_amount: Decimal | None = None
     interest_rate: Decimal | None = None
@@ -78,6 +81,7 @@ class FactoringSignDocument(BaseSchema):
 class PrepareFactoringDocumentsResponse(BaseSchema):
     id: int
     credit_contract: str
+    branch_code: str
     status: str
     provider_code: str
     documents: list[FactoringSignDocument]
