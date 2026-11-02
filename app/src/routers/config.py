@@ -30,6 +30,10 @@ class APIAlbatoMetaPrefixConfig:
     prefix: str = "/albato"
 
 
+class APIMailingPrefixConfig:
+    prefix: str = "/mailing"
+
+
 class APIShowroomPrefixConfig:
     prefix: str = "/showroom"
 
@@ -48,6 +52,7 @@ class APIPrefixConfig:
     auto_sign: APIAutoSignPrefixConfig = APIAutoSignPrefixConfig()
     albato_meta: APIAlbatoMetaPrefixConfig = APIAlbatoMetaPrefixConfig()
     showroom: APIShowroomPrefixConfig = APIShowroomPrefixConfig()
+    mailing: APIMailingPrefixConfig = APIMailingPrefixConfig()
     buh_1c: APIBuh1cPrefixConfig = APIBuh1cPrefixConfig()
 
 

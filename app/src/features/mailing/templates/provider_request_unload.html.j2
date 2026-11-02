@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <style>
+        body{
+            font-size: 10px !important;
+        }
+        table{
+            width: 100%;
+        }
+        thead {display: table-header-group;}
+        tfoot {display: table-row-group;}
+        tr { page-break-inside: avoid;}
+        .main-table, .main-table th, .main-table td {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+        .child-table, .child-table th, .child-table td {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 2px;
+        }
+        th{
+            text-align: center;
+        }
+        /*.head-tr{
+            border-top: 1px solid black;
+            border-left: 1px solid black;
+            border-right: 1px solid black;
+        }*/
+        .head-tr th{
+            background:  #66ccff;
+        }
+        /*.main-tr{
+            border-top: 1px solid black;
+            border-left: 1px solid black;
+            border-right: 1px solid black;
+        }*/
+        .main-tr td{
+            background:  #ffffff;
+        }
+        /*.item-tr{
+            border-bottom: 1px solid black;
+            border-left: 1px solid black;
+            border-right: 1px solid black;
+        }*/
+        .statuses-td{
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: flex-start;
+        }
+        .text-left{
+            text-align: left;
+        }
+        .text-right{
+            text-align: right;
+        }
+        .text-center{
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h4>{{ provider_name }}</h4>
+    <p>{{ status_name }}</p>
+    <table class="main-table">
+        <thead>
+        <tr class="head-tr">
+            <th>Номер заявки</th>
+            <th>Номер ремонта</th>
+            <th>Сумма заявки<br>(тенге)</th>
+            <th>Адрес доставки</th>
+            <th>Дата планируемой отгрузки</th>
+            <th>Статусы</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for value in rows %}
+            <tr class="main-tr">
+                <td class="text-right">{{ value.provider_request_id }}</td>
+                <td class="text-right">{{ value.remont_id }}</td>
+                <td class="text-right">{{ value.amount | tenge_text }}</td>
+                <td class="text-left">
+                    <span>
+                        <b>ЖК:</b> {{ value.resident_name }}                    </span><br>
+                    <span>
+                        <b>Кв:</b> {{ value.flat_num }}                    </span><br>
+                    <span>
+                        <b>Город:</b> {{ value.city_name }}                    </span>
+                </td>
+                <td class="text-center">
+                    {{ value.date_shipping_plan }}                </td>
+                <td class="text-left">
+                    <div class=" statuses-td">
+                        {{ value.statuses | status_lines }}                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

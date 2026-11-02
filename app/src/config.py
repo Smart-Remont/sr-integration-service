@@ -77,6 +77,64 @@ class ShowroomConfig:
     bi_url: str = os.getenv("SHOWROOM_BI_URL", "").strip()
 
 
+class MailingCronAuthConfig:
+    """Basic auth of the crontab wget lines for /api/mailing/*. Empty: 503."""
+
+    username: str = os.getenv("MAILING_CRON_USER", "")
+    password: str = os.getenv("MAILING_CRON_PASSWORD", "")
+
+
+class MailingConfig:
+    """The mail server and the rest of what PHP keeps in ``[email_notify]`` and its code. No defaults."""
+
+    smtp_host: str = os.getenv("MAILING_SMTP_HOST", "").strip()
+    # Not a number counts as not set: 503 on these routes, and the rest of the service still starts.
+    smtp_port: int = (
+        int(os.getenv("MAILING_SMTP_PORT", "").strip())
+        if os.getenv("MAILING_SMTP_PORT", "").strip().isdecimal()
+        else 0
+    )
+    # Also the address letters go from, as ``constants.username`` in PHP.
+    smtp_username: str = os.getenv("MAILING_SMTP_USERNAME", "").strip()
+    smtp_password: str = os.getenv("MAILING_SMTP_PASSWORD", "")
+    from_name: str = os.getenv("MAILING_FROM_NAME", "")
+    # ``getHttpHost()`` of PHP: scheme and host from the wget line of the cron, without a slash.
+    link_base_url: str = os.getenv("MAILING_LINK_BASE_URL", "").strip()
+    # A copy of the letters ``EXPEDITOR_CODE_ACCEPT``.
+    expeditor_cc_address: str = os.getenv("MAILING_EXPEDITOR_CC_ADDRESS", "").strip()
+    expeditor_cc_name: str = os.getenv("MAILING_EXPEDITOR_CC_NAME", "")
+    # Letters about database errors go from another mailbox, written in the PHP code. After a failed
+    # letter PHP logs in to this mailbox with its password.
+    error_from_address: str = os.getenv("MAILING_ERROR_FROM_ADDRESS", "").strip()
+    error_from_name: str = os.getenv("MAILING_ERROR_FROM_NAME", "")
+    error_smtp_password: str = os.getenv("MAILING_ERROR_SMTP_PASSWORD", "")
+    # ``$_SERVER['DOCUMENT_ROOT']`` of Office: attachments are read from it, provider PDFs go to it.
+    office_public_dir: str = os.getenv("MAILING_OFFICE_PUBLIC_DIR", "").strip()
+
+    @property
+    def smtp_is_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_port and self.smtp_username and self.smtp_password)
+
+    @property
+    def queue_is_configured(self) -> bool:
+        return bool(
+            self.smtp_is_configured
+            and self.from_name
+            and self.link_base_url
+            and self.expeditor_cc_address
+            and self.office_public_dir
+        )
+
+    @property
+    def error_queue_is_configured(self) -> bool:
+        return bool(
+            self.smtp_is_configured
+            and self.error_from_address
+            and self.error_from_name
+            and self.error_smtp_password
+        )
+
+
 class AutoSignConfig:
     """Crons of company signing. Empty by default, so a stand without them signs nothing: 503.
 
@@ -297,6 +355,8 @@ auto_sign_cron_auth_config = AutoSignCronAuthConfig()
 buh_1c_auth_config = Buh1cAuthConfig()
 showroom_cron_auth_config = ShowroomCronAuthConfig()
 showroom_config = ShowroomConfig()
+mailing_cron_auth_config = MailingCronAuthConfig()
+mailing_config = MailingConfig()
 auto_sign_config = AutoSignConfig()
 kcell_config = KcellConfig()
 client_sign_config = ClientSignConfig.from_env()

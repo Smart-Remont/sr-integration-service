@@ -20,11 +20,12 @@ _RELEASE_SECONDS = DB_STEP_SECONDS
 
 
 @asynccontextmanager
-async def database_step_limit() -> AsyncIterator[None]:
+async def database_step_limit(seconds: float | None = None) -> AsyncIterator[None]:
     """A hung database call must not stop a cron forever. Going over the limit: ``TimeoutError``."""
+    limit = DB_STEP_SECONDS if seconds is None else seconds
     async with (
-        asyncio.timeout(DB_STEP_SECONDS + ROLLBACK_MARGIN_SECONDS),
-        asyncio.timeout(DB_STEP_SECONDS),
+        asyncio.timeout(limit + ROLLBACK_MARGIN_SECONDS),
+        asyncio.timeout(limit),
     ):
         yield
 
