@@ -118,10 +118,3 @@ PhpBasicAuthDep = Annotated[None, Depends(_require_php_basic_auth)]
 
 async def method_not_allowed(_: PhpBasicAuthDep) -> Response:
     return php_error_response(_METHOD_NOT_ALLOWED, status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-def php_text(value: object) -> str:
-    """How PHP turns a decoded JSON scalar into a SQL parameter."""
-    if value is True:
-        return "1"
-    return str(value)

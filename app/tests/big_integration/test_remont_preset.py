@@ -299,3 +299,14 @@ async def test_nested_function_error_fails_the_whole_response(
 
     assert response.status_code == 500
     assert response.json() == _error("Рендер недоступен")
+
+
+@pytest.mark.parametrize(("value", "bound"), [(2.0, "2"), (2.5, "2.5"), (123, "123"), (True, "1")])
+async def test_placement_scalar_is_bound_as_php_text(
+    client: AsyncClient, db: FakeConnection, value: object, bound: str
+) -> None:
+    db.responses = {"rest.ddu__preset_list_v2": [], "rest.render_plan_room__read": []}
+
+    await client.post(LIST_ROUTE, json={"placementUUID": value}, headers=_auth())
+
+    assert ("rest.render_plan_room__read", (bound,)) in db.calls

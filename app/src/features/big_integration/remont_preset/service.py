@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response
 
-from src.php_compat.text import is_php_empty
+from src.php_compat.text import is_php_empty, php_string
 from src.repository.base import SpRows
 
-from ..php_contract import BigIntegrationRequestError, php_success_response, php_text
+from ..php_contract import BigIntegrationRequestError, php_success_response
 from .filling import PresetFillingLoader
 
 if TYPE_CHECKING:
@@ -101,4 +101,4 @@ def _placement_uuid(body: dict[str, object]) -> str:
     placement_uuid = body.get("placementUUID")
     if is_php_empty(placement_uuid):
         raise BigIntegrationRequestError("ГУИД помещения не может быть пустым")
-    return php_text(placement_uuid)
+    return php_string(placement_uuid)
