@@ -48,6 +48,14 @@ def php_pdo_message(exc: BaseException) -> str:
     return _pdo_message(cause.sqlstate, _state_name(cause), "\n".join(lines))
 
 
+def php_error_state(exc: BaseException) -> str:
+    """SQLSTATE of a database error, the class name of anything else. Safe for a log."""
+    cause = _postgres_error(exc)
+    if cause is None:
+        return type(exc).__name__
+    return cause.sqlstate or type(cause).__name__
+
+
 def is_php_unhandled_error(clean_text: str) -> bool:
     """A failure of the database itself, as opposed to a refusal a function raised on purpose."""
     return clean_text.startswith(_UNHANDLED_PREFIX)

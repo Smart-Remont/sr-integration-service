@@ -11,10 +11,25 @@ DESCRIPTION = (
     "| Kaspi (перенос из PHP) | `/api/kaspi/...` | заголовок от nginx, адреса Kaspi в nginx "
     "| XML как в PHP |\n"
     "| SMS Kcell (перенос из PHP) | `/api/sms/...` | Basic, вызывает крон | текст как в PHP |\n"
+    "| Подпись документов клиентом (перенос из PHP) | `/api/client_sign/...` "
+    "| hash или uuid в ссылке, колбэк по ключу в адресе | HTML, файл или JSON в формате PHP |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
 )
 
 TAGS = [
+    {
+        "name": "Client documents signing",
+        "description": (
+            "Страницы подписи договора и ДС клиентом, колбэк MyNCA и скачивание документов. "
+            "Перенос из PHP `ClientSignController`. Побайтно сверены с PHP на стенде: страница со "
+            "списком и неподписанными карточками, старый адрес, ошибки скачивания, переход "
+            "`AGREEMENT_MANUAL`, ненайденные документы `download-agreement` и `download-ds`. "
+            "Вживую не сверялись, только тесты: карточки с подписями и отозванные, `perform-sign`, "
+            "колбэк, файлы через MyNCA и партнёра. Намеренно отличается от PHP: колбэку нужен ключ "
+            "в адресе, а неподписанный документ в `download-agreement` и `download-ds` отвечает "
+            "503, потому что в сервисе нет LibreOffice."
+        ),
+    },
     {
         "name": "Installment (Freedom Finance)",
         "description": (

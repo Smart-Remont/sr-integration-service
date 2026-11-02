@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from typing import Self
 
 from dotenv import load_dotenv
 
@@ -24,6 +26,10 @@ def _first_nonempty_env(*names: str, default: str) -> str:
         if value:
             return value.rstrip("/")
     return default.rstrip("/")
+
+
+def _url_env(name: str) -> str:
+    return os.getenv(name, "").strip().rstrip("/")
 
 
 class BigIntegrationAuthConfig:
@@ -61,6 +67,35 @@ class KcellConfig:
     @property
     def status_is_configured(self) -> bool:
         return bool(self.status_url and self.status_username and self.status_password)
+
+
+@dataclass(frozen=True)
+class ClientSignConfig:
+    """client-sign pages moved from PHP. Empty by default: the step that needs a value answers 503."""
+
+    mynca_base_url: str = ""
+    mynca_token: str = ""
+    # The address clients and MyNCA see; PHP took it from the request (getHttpHost).
+    public_url: str = ""
+    # Serves /dict/report, /dict/ds-download and the /documents/ files.
+    office_url: str = ""
+    myspace_api_url: str = ""
+    # Partner backend with /get_signed_file, for documents without a MyNCA group.
+    partner_url: str = ""
+    # Keys the back_url given to MyNCA. It is how a callback proves where it came from.
+    callback_secret: str = ""
+
+    @classmethod
+    def from_env(cls) -> Self:
+        return cls(
+            mynca_base_url=_url_env("CLIENT_SIGN_MYNCA_BASE_URL"),
+            mynca_token=os.getenv("CLIENT_SIGN_MYNCA_TOKEN", "").strip(),
+            public_url=_url_env("CLIENT_SIGN_PUBLIC_URL"),
+            office_url=_url_env("CLIENT_SIGN_OFFICE_URL"),
+            myspace_api_url=_url_env("CLIENT_SIGN_MYSPACE_API_URL"),
+            partner_url=_url_env("CLIENT_SIGN_PARTNER_URL"),
+            callback_secret=os.getenv("CLIENT_SIGN_CALLBACK_SECRET", ""),
+        )
 
 
 class InstallmentAuthConfig:
@@ -209,6 +244,7 @@ big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
 sms_cron_auth_config = SmsCronAuthConfig()
 kcell_config = KcellConfig()
+client_sign_config = ClientSignConfig.from_env()
 installment_auth_config = InstallmentAuthConfig()
 integration_context_config = IntegrationContextConfig()
 factoring_auth_config = FactoringAuthConfig()

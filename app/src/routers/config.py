@@ -18,12 +18,17 @@ class APISmsPrefixConfig:
     prefix: str = "/sms"
 
 
+class APIClientSignPrefixConfig:
+    prefix: str = "/client_sign"
+
+
 class APIPrefixConfig:
     prefix: str = "/api"
     v1: APIV1PrefixConfig = APIV1PrefixConfig()
     big_integration: APIBigIntegrationPrefixConfig = APIBigIntegrationPrefixConfig()
     kaspi: APIKaspiPrefixConfig = APIKaspiPrefixConfig()
     sms: APISmsPrefixConfig = APISmsPrefixConfig()
+    client_sign: APIClientSignPrefixConfig = APIClientSignPrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

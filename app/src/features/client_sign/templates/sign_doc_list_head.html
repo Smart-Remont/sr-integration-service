@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title> — Подписание документов</title>
+    <link rel="shortcut icon" href="/design/img/favicon.ico" type="image/x-icon">
+    <link href="/cabinet/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/cabinet/fonts/fa/css/font-awesome.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script src="/cabinet/js/bootstrap.min.js"></script>
+    <style>
+        :root {
+            --clr-primary: #2563eb;
+            --clr-primary-dark: #1d4ed8;
+            --clr-success: #16a34a;
+            --clr-success-light: #f0fdf4;
+            --clr-warning: #d97706;
+            --clr-warning-light: #fffbeb;
+            --clr-danger: #dc2626;
+            --clr-danger-light: #fef2f2;
+            --clr-muted: #64748b;
+            --clr-border: #e2e8f0;
+            --clr-bg: #f1f5f9;
+            --clr-white: #ffffff;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+            --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+            --radius: 12px;
+            --radius-sm: 8px;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--clr-bg);
+            color: #1e293b;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .cs-container { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+
+        /* ===== Шапка ===== */
+        .cs-page-header {
+            background: linear-gradient(135deg, var(--clr-primary) 0%, #7c3aed 100%);
+            color: #fff;
+            padding: 14px 0 14px;
+        }
+        .cs-page-header .cs-container { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+        .cs-page-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin: 0 0 4px;
+        }
+        .cs-page-header .subtitle {
+            font-size: 14px;
+            opacity: .85;
+        }
+
+        /* ===== Предупреждение ===== */
+        .cs-notice {
+            max-width: 720px;
+            margin: 10px auto 0;
+            padding: 0 16px;
+            position: relative;
+            z-index: 2;
+        }
+        .cs-notice-inner {
+            background: var(--clr-warning-light);
+            border: 1px solid #fde68a;
+            border-radius: var(--radius-sm);
+            padding: 12px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 13px;
+            color: #92400e;
+            box-shadow: var(--shadow-sm);
+        }
+        .cs-notice-inner i {
+            font-size: 18px;
+            color: var(--clr-warning);
+            margin-top: 1px;
+            flex-shrink: 0;
+        }
+
+        /* ===== Информация о клиенте ===== */
+        .cs-client-info {
+            max-width: 720px;
+            margin: 16px auto 0;
+            padding: 0 16px;
+        }
+        .cs-client-card {
+            background: var(--clr-white);
+            border: 1px solid var(--clr-border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .cs-client-card-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+        .cs-client-card-toggle .cs-client-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .cs-client-card-toggle .cs-toggle-icon {
+            color: var(--clr-muted);
+            font-size: 13px;
+            transition: transform .2s;
+        }
+        .cs-client-card-toggle.collapsed .cs-toggle-icon {
+            transform: rotate(-90deg);
+        }
+        .cs-client-details {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--clr-border);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px 24px;
+            font-size: 13px;
+        }
+        .cs-client-details .cs-detail-label {
+            color: var(--clr-muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 1px;
+        }
+        .cs-client-details .cs-detail-value {
+            color: #1e293b;
+        }
+        .cs-client-details .cs-detail-value a {
+            color: var(--clr-primary);
+            text-decoration: none;
+        }
+        .cs-client-details .cs-detail-value a:hover { text-decoration: underline; }
+
+        @media (max-width: 480px) {
+            .cs-client-details {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===== Контент ===== */
+        .cs-main-content {
+            max-width: 720px;
+            margin: 20px auto 40px;
+            padding: 0 16px;
+        }
+
+        /* ===== Табы ===== */
+        .cs-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--clr-white);
+            border: 1px solid var(--clr-border);
+            border-radius: var(--radius);
+            padding: 4px;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 16px;
+        }
+        .cs-tab-btn {
+            flex: 1;
+            padding: 10px 12px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--clr-muted);
+            cursor: pointer;
+            transition: all .2s;
+            text-align: center;
+        }
+        .cs-tab-btn:hover {
+            color: #1e293b;
+            background: var(--clr-bg);
+        }
+        .cs-tab-btn.active {
+            background: var(--clr-primary);
+            color: #fff;
+            box-shadow: 0 1px 3px rgba(37,99,235,.3);
+        }
+        .cs-tab-btn .cs-badge-cnt {
+            display: inline-block;
+            min-width: 20px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 6px;
+            line-height: 1.2;
+        }
+        .cs-tab-btn.active .cs-badge-cnt {
+            background: rgba(255,255,255,.25);
+            color: #fff;
+        }
+        .cs-tab-btn:not(.active) .cs-badge-cnt {
+            background: #e2e8f0;
+            color: var(--clr-muted);
+        }
+
+        .cs-tab-panel { display: none; }
+        .cs-tab-panel.active { display: block; }
+
+        /* ===== Карточка документа ===== */
+        .cs-doc-card {
+            background: var(--clr-white);
+            border: 1px solid var(--clr-border);
+            border-radius: var(--radius);
+            padding: 18px 20px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow-sm);
+            transition: box-shadow .2s;
+        }
+        .cs-doc-card:hover {
+            box-shadow: var(--shadow-md);
+        }
+        .cs-doc-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .cs-doc-title {
+            font-weight: 600;
+            font-size: 15px;
+            line-height: 1.4;
+            flex: 1;
+        }
+        .cs-doc-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .cs-doc-badge.cs-doc-badge-signed {
+            background: var(--clr-success-light);
+            color: var(--clr-success);
+            border: 1px solid #bbf7d0;
+        }
+        .cs-doc-badge.cs-doc-badge-unsigned {
+            background: var(--clr-warning-light);
+            color: var(--clr-warning);
+            border: 1px solid #fde68a;
+        }
+        .cs-doc-badge.cs-doc-badge-revoked {
+            background: var(--clr-danger-light);
+            color: var(--clr-danger);
+            border: 1px solid #fecaca;
+        }
+        .cs-doc-badge.cs-doc-badge-manual {
+            background: #f0f9ff;
+            color: #0369a1;
+            border: 1px solid #bae6fd;
+        }
+        .cs-doc-badge.cs-doc-badge-mixed {
+            background: #eef2ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+        }
+
+        /* ===== Подписи (блок информации) ===== */
+        .cs-sign-info {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .cs-sign-info.cs-sign-info-client {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+        }
+        .cs-sign-info.cs-sign-info-manager {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+        }
+        .cs-sign-info.cs-sign-info-revoked {
+            background: var(--clr-danger-light);
+            border: 1px solid #fecaca;
+        }
+        .cs-sign-info-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .cs-sign-info-row:last-child { margin-bottom: 0; }
+        .cs-sign-info-row i {
+            margin-top: 2px;
+            flex-shrink: 0;
+            width: 16px;
+            text-align: center;
+        }
+        .cs-sign-info-label {
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        .cs-sign-info-value {
+            word-break: break-word;
+        }
+
+        /* ===== Кнопки действий ===== */
+        .cs-doc-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 14px;
+        }
+        .cs-btn-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all .2s;
+            line-height: 1.3;
+        }
+        .cs-btn-action:hover { text-decoration: none; }
+        .cs-btn-action i { font-size: 14px; }
+
+        .cs-btn-download {
+            background: #f0fdf4;
+            color: var(--clr-success);
+            border: 1px solid #bbf7d0;
+        }
+        .cs-btn-download:hover {
+            background: #dcfce7;
+            color: var(--clr-success);
+        }
+
+        .cs-btn-sign {
+            background: var(--clr-primary);
+            color: #fff;
+            border: 1px solid var(--clr-primary);
+        }
+        .cs-btn-sign:hover {
+            background: var(--clr-primary-dark);
+            color: #fff;
+            border-color: var(--clr-primary-dark);
+        }
+        .cs-btn-sign.cs-is-disabled {
+            opacity: .6;
+            pointer-events: none;
+        }
+
+        /* ===== Пустой список ===== */
+        .cs-empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--clr-muted);
+        }
+        .cs-empty-state i {
+            font-size: 48px;
+            margin-bottom: 12px;
+            display: block;
+            opacity: .4;
+        }
+        .cs-empty-state p {
+            font-size: 14px;
+            margin: 0;
+        }
+
+        /* ===== Ошибка ===== */
+        .cs-error-container {
+            max-width: 720px;
+            margin: 40px auto;
+            padding: 0 16px;
+            text-align: center;
+        }
+        .cs-error-card {
+            background: var(--clr-white);
+            border: 1px solid #fecaca;
+            border-radius: var(--radius);
+            padding: 40px 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .cs-error-card i {
+            font-size: 48px;
+            color: var(--clr-danger);
+            margin-bottom: 16px;
+            display: block;
+        }
+        .cs-error-card h3 {
+            color: var(--clr-danger);
+            font-size: 18px;
+            margin: 0 0 8px;
+        }
+        .cs-error-card p {
+            color: var(--clr-muted);
+            font-size: 14px;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
