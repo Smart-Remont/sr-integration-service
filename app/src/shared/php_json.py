@@ -40,6 +40,12 @@ def php_json_encode_pretty(value: object) -> bytes:
     return _escape_line_separators(json.dumps(value, ensure_ascii=False, indent=4)).encode()
 
 
+def php_json_encode_unescaped(value: object) -> str:
+    """``json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)``."""
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return _escape_line_separators(text)
+
+
 def php_json_encode_default(value: object) -> str:
     """``json_encode($value)`` without flags. Invalid UTF-8 gives ``false``, which PDO sends as ``''``."""
     text = json.dumps(_as_php_array(value), ensure_ascii=False, separators=(",", ":"))

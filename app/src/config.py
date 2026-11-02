@@ -37,6 +37,32 @@ class KaspiProxyConfig:
     secret: str = os.getenv("KASPI_PROXY_SECRET", "")
 
 
+class SmsCronAuthConfig:
+    """Basic auth of the crontab wget lines for /api/sms/*. Empty: 503."""
+
+    username: str = os.getenv("SMS_CRON_USER", "")
+    password: str = os.getenv("SMS_CRON_PASSWORD", "")
+
+
+class KcellConfig:
+    """Sending and status reads are separate Kcell addresses with separate passwords. Empty: 503."""
+
+    send_url: str = os.getenv("KCELL_SEND_URL", "")
+    send_username: str = os.getenv("KCELL_SEND_USER", "")
+    send_password: str = os.getenv("KCELL_SEND_PASSWORD", "")
+    status_url: str = os.getenv("KCELL_BATCH_STATUS_URL", "").rstrip("/")
+    status_username: str = os.getenv("KCELL_BATCH_STATUS_USER", "")
+    status_password: str = os.getenv("KCELL_BATCH_STATUS_PASSWORD", "")
+
+    @property
+    def send_is_configured(self) -> bool:
+        return bool(self.send_url and self.send_username and self.send_password)
+
+    @property
+    def status_is_configured(self) -> bool:
+        return bool(self.status_url and self.status_username and self.status_password)
+
+
 class InstallmentAuthConfig:
     username: str = os.getenv("INSTALLMENT_API_USER", "")
     password: str = os.getenv("INSTALLMENT_API_PASSWORD", "")
@@ -181,6 +207,8 @@ class KlRecognitionConfig:
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
+sms_cron_auth_config = SmsCronAuthConfig()
+kcell_config = KcellConfig()
 installment_auth_config = InstallmentAuthConfig()
 integration_context_config = IntegrationContextConfig()
 factoring_auth_config = FactoringAuthConfig()

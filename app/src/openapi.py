@@ -10,6 +10,7 @@ DESCRIPTION = (
     "| BIG Integration | `/api/big_integration/...` | Basic | конверт `{data, response, error}` |\n"
     "| Kaspi (перенос из PHP) | `/api/kaspi/...` | заголовок от nginx, адреса Kaspi в nginx "
     "| XML как в PHP |\n"
+    "| SMS Kcell (перенос из PHP) | `/api/sms/...` | Basic, вызывает крон | текст как в PHP |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
 )
 
@@ -46,6 +47,13 @@ TAGS = [
             "включая ошибки в XML с кодом 200. Kaspi запросы не подписывает: маршрут "
             "доступен только через nginx: там список адресов Kaspi и заголовок "
             "`X-Kaspi-Proxy-Secret`."
+        ),
+    },
+    {
+        "name": "SMS (Kcell)",
+        "description": (
+            "Кроны отправки SMS и чтения статусов, перенос из PHP `IntegrationController`. Запросы к "
+            "Kcell и ответы совпадают с PHP. Вызов этих адресов отправляет настоящие SMS из очереди."
         ),
     },
     {
