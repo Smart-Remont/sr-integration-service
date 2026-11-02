@@ -38,6 +38,23 @@ class KlRoomPart(BaseSchema):
     area: float
 
 
+class KlRoomRef(BaseSchema):
+    name: str
+    area: float
+    room_id: int | None = Field(
+        default=None, description="Комната системы соседа; null — терраса или не определена."
+    )
+
+
+class KlRoomNeighbors(BaseSchema):
+    """Стороны — как на плане листа, а не стороны света."""
+
+    left: list[KlRoomRef] = Field(default_factory=list)
+    right: list[KlRoomRef] = Field(default_factory=list)
+    up: list[KlRoomRef] = Field(default_factory=list)
+    down: list[KlRoomRef] = Field(default_factory=list)
+
+
 class KlRoom(BaseSchema):
     name: str = Field(description="Название, как напечатано на листе (`С/у`, `Гард.`, …).")
     area: float = Field(description="Площадь, м²; у лоджий и балконов — полная.")
@@ -56,6 +73,13 @@ class KlRoom(BaseSchema):
     merged_from: list[KlRoomPart] = Field(
         default_factory=list,
         description="Из чего сложена площадь: кухня и кладовая за пунктиром.",
+    )
+    neighbors: KlRoomNeighbors = Field(
+        default_factory=KlRoomNeighbors,
+        description=(
+            "Смежные помещения по сторонам плана, по ответу модели. Внутри стороны — порядок вдоль "
+            "стены: `left` и `right` сверху вниз, `up` и `down` слева направо."
+        ),
     )
 
 

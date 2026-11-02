@@ -130,6 +130,7 @@ async def test_recognized_when_sum_matches_sheet_and_bi(
         "room_id": 20,
         "system_name": "Балкон",
         "merged_from": [],
+        "neighbors": {"left": [], "right": [], "up": [], "down": []},
     }
     assert result["checks"] == {
         "rooms_sum": ROOMS_SUM,
@@ -374,6 +375,91 @@ async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: 
     result = await recognize(client)
     assert result["status"] == "not_recognized"
     assert "тип «Зал» у «Гостиная» не из списка" in result["doubts"]
+
+
+async def test_room_layout_comes_with_system_rooms(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        ROOMS[0]
+        | {
+            "neighbors": {
+                "left": [{"name": "Гостиная", "area": 20.85}],
+                "down": [{"name": "Лоджия", "area": 3.08}],
+            },
+        },
+        ROOMS[1],
+        ROOMS[2] | {"neighbors": {"right": [{"name": "Кухня", "area": 11.19}]}},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+    response = await client.post(
+        URL, json={"flat_guid": FLAT_GUID, "bi_area": ROOMS_SUM}, headers=auth()
+    )
+    data = response.json()
+    assert data["status"] == "recognized"
+    kitchen = next(room for room in data["rooms"] if room["name"] == "Кухня")
+    assert kitchen["neighbors"]["left"] == [{"name": "Гостиная", "area": 20.85, "room_id": 1}]
+    assert kitchen["neighbors"]["down"] == [{"name": "Лоджия", "area": 3.08, "room_id": 20}]
+    assert kitchen["neighbors"]["up"] == []
+    loggia = next(room for room in data["rooms"] if room["name"] == "Лоджия")
+    assert loggia["neighbors"] == {"left": [], "right": [], "up": [], "down": []}
+
+
+async def test_neighbours_follow_merged_rooms(client: AsyncClient, composer: AsyncMock) -> None:
+    storage = {
+        "name": "Кладовая",
+        "type": "Кладовая",
+        "area": 3.16,
+        "financialArea": 3.16,
+        "openTo": {"name": "Кухня", "area": 11.19},
+        "neighbors": {
+            "up": [{"name": "Гостиная", "area": 20.85}],
+            "left": [{"name": "Кухня", "area": 11.19}],
+        },
+    }
+    rooms = [
+        ROOMS[0] | {"neighbors": {"right": [{"name": "Кладовая", "area": 3.16}]}},
+        ROOMS[1] | {"neighbors": {"up": [{"name": "Кладовая", "area": 3.16}]}},
+        ROOMS[2],
+        storage,
+    ]
+    total = round(ROOMS_SUM + 3.16, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=rooms, totalArea=total, checks={"sheetTotal": total}
+    )
+    response = await client.post(
+        URL, json={"flat_guid": FLAT_GUID, "bi_area": total}, headers=auth()
+    )
+    data = response.json()
+    assert data["status"] == "recognized"
+    kitchen = next(room for room in data["rooms"] if room["name"] == "Кухня")
+    # the storeroom became part of the kitchen: no reference to itself, its neighbours stay
+    assert kitchen["neighbors"]["right"] == []
+    assert kitchen["neighbors"]["left"] == []
+    assert kitchen["neighbors"]["up"] == [{"name": "Гостиная", "area": 20.85, "room_id": 1}]
+    loggia = next(room for room in data["rooms"] if room["name"] == "Лоджия")
+    assert loggia["neighbors"]["up"] == [{"name": "Кухня", "area": 14.35, "room_id": 2}]
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        {"neighbors": "слева кухня"},
+        {"neighbors": {"left": "Кухня", "up": [{"name": "Кладовка"}, "Спальня"]}},
+        {"neighbors": {"left": [{"name": "Несуществующая", "area": 99.99}]}},
+    ],
+)
+async def test_bad_layout_does_not_fail_the_sheet(
+    client: AsyncClient, composer: AsyncMock, layout: dict[str, Any]
+) -> None:
+    composer.read_plan.return_value = composer_answer(rooms=[ROOMS[0] | layout, *ROOMS[1:]])
+    response = await client.post(
+        URL, json={"flat_guid": FLAT_GUID, "bi_area": ROOMS_SUM}, headers=auth()
+    )
+    data = response.json()
+    assert data["status"] == "recognized"
+    kitchen = next(room for room in data["rooms"] if room["name"] == "Кухня")
+    assert kitchen["neighbors"] == {"left": [], "right": [], "up": [], "down": []}
 
 
 async def test_not_recognized_when_bi_has_no_kl(

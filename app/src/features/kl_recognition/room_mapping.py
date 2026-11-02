@@ -108,6 +108,8 @@ class ReadRoom:
     # The neighbour (name, area) the agent says this room is open to across a dashed line.
     open_to: tuple[str, float] | None = None
     merged_from: list[tuple[str, float]] = field(default_factory=list)
+    # Side of the plan → neighbours (name, area) as the agent wrote them.
+    neighbors: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
 
 
 def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoom]:
@@ -135,6 +137,8 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
         parent.merged_from.append((room.name, room.area))
         parent.area = round(parent.area + room.area, 2)
         parent.financial_area = round(parent.financial_area + room.financial_area, 2)
+        for side, refs in room.neighbors.items():
+            parent.neighbors.setdefault(side, []).extend(refs)
         absorbed.add(i)
     return [room for i, room in enumerate(rooms) if i not in absorbed]
 

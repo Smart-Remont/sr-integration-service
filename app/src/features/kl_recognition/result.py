@@ -19,12 +19,15 @@ from .schemas import (
     KlRecognitionMeta,
     KlRecognitionResult,
     KlRoom,
+    KlRoomNeighbors,
     KlRoomPart,
+    KlRoomRef,
     RecognitionStatus,
 )
 
 # Sheet areas are rounded to hundredths; correctly read sheets differ from the total by 0–0.03.
 SUM_TOLERANCE = 0.03
+NEIGHBOR_SIDES = ("left", "right", "up", "down")
 
 
 def first_json_object(text: str) -> dict[str, Any] | None:
@@ -66,6 +69,61 @@ def _open_to(raw: Any) -> tuple[str, float] | None:
     return None if area is None else (str(raw.get("name") or "").strip(), area)
 
 
+def _raw_neighbors(raw: Any) -> dict[str, list[tuple[str, float]]]:
+    """The agent's neighbours by side. Anything malformed is dropped: the layout is an extra and
+    must not fail a sheet whose rooms and sums are right."""
+    neighbors: dict[str, list[tuple[str, float]]] = {}
+    for side in NEIGHBOR_SIDES:
+        refs = raw.get(side) if isinstance(raw, dict) else None
+        found = [_open_to(ref) for ref in refs] if isinstance(refs, list) else []
+        neighbors[side] = [ref for ref in found if ref is not None]
+    return neighbors
+
+
+def _neighbors(
+    room: ReadRoom,
+    printed_areas: dict[int, float],
+    read: list[ReadRoom],
+    targets: list[Any],
+    terraces: list[ReadRoom],
+) -> KlRoomNeighbors:
+    """Resolves the agent's references to the final rooms. A room may have been merged or got its
+    full area, so it is looked up by every (name, area) it was read under; a reference to nothing,
+    to itself or to several rooms is left out."""
+    known = [
+        (other, target, [(other.name, printed_areas[id(other)]), *other.merged_from])
+        for other, target in zip(read, targets, strict=True)
+    ] + [(terrace, None, [(terrace.name, terrace.area)]) for terrace in terraces]
+    sides: dict[str, list[KlRoomRef]] = {}
+    for side in NEIGHBOR_SIDES:
+        refs: list[KlRoomRef] = []
+        for name, area in room.neighbors.get(side, []):
+            hits = [
+                entry
+                for entry in known
+                if any(abs(part_area - area) < 0.005 for _, part_area in entry[2])
+            ]
+            if len(hits) > 1:
+                hits = [
+                    entry
+                    for entry in hits
+                    if any(
+                        part_name == name and abs(part_area - area) < 0.005
+                        for part_name, part_area in entry[2]
+                    )
+                ] or hits
+            if len(hits) != 1 or hits[0][0] is room:
+                continue
+            other, target, _ = hits[0]
+            ref = KlRoomRef(
+                name=other.name, area=other.area, room_id=target.room_id if target else None
+            )
+            if ref not in refs:
+                refs.append(ref)
+        sides[side] = refs
+    return KlRoomNeighbors(**sides)
+
+
 def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRoom]]:
     """Rooms of the flat mapped to system rooms, and terraces kept apart (they count in the
     sheet total but are not rooms)."""
@@ -87,9 +145,12 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
                 financial_area=financial or area,
                 kind=kind,
                 open_to=_open_to(raw.get("openTo")),
+                neighbors=_raw_neighbors(raw.get("neighbors")),
             )
         )
 
+    # Neighbours point at the areas the agent read, which the rules below may change.
+    printed_areas = {id(room): room.area for room in read}
     for room in read:
         if (
             room.kind is RoomType.BALCONY
@@ -119,6 +180,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
             room_id=target.room_id if target else None,
             system_name=target.name if target else None,
             merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
+            neighbors=_neighbors(room, printed_areas, read, targets, terraces),
         )
         for room, target in zip(read, targets, strict=True)
     ], terraces
