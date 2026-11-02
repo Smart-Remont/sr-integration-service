@@ -116,11 +116,6 @@ def php_int(value: object) -> int:
             return 0
 
 
-def php_float(text: str) -> float:
-    """``(float)$text``: the numeric prefix, and 0 without one."""
-    return _numeric_prefix(text)
-
-
 def php_is_positive(value: object) -> bool:
     """``$value > 0``: an array is greater than any number, a boolean compares as a boolean."""
     match value:

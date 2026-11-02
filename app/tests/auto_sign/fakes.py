@@ -1,6 +1,6 @@
-"""The fake database, MyNCA and partner of the auto-sign tests.
+"""The fake database and MyNCA of the auto-sign tests.
 
-MyNCA and the partner are ``httpx.MockTransport``, the database is a fake connection: nothing here
+MyNCA is ``httpx.MockTransport``, the database is a fake connection: nothing here
 reaches a real service, no key is real, and the routes never run against a real database. Expected
 values come from reading PHP.
 """
@@ -10,7 +10,6 @@ import base64
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -20,14 +19,12 @@ from tests.big_integration.fakes import FakeConnection
 
 OPERATOR_ROUTE = "/api/auto_sign/cron-auto-sign-operator"
 UPLOAD_ROUTE = "/api/auto_sign/cron-auto-upload-sign-doc"
-PDF_ROUTE = "/api/auto_sign/pdf-find-sum"
 HTML_TYPE = "text/html; charset=UTF-8"
 
 CRON_USER = "auto-sign-cron"
 CRON_PASSWORD = "auto-sign-cron-password"
 MYNCA_URL = "https://mynca.test/api"
 MYNCA_TOKEN = "mynca-token-secret"
-PARTNER_URL = "https://partner.test/partner"
 MASTER_KEY = "master-key-secret"
 KEY_BYTES = b"\x00\x01PKCS12-key-bytes-secret\xff\xfe"
 KEY_BASE64 = base64.b64encode(KEY_BYTES).decode()
@@ -53,12 +50,10 @@ FIND_SIGN = "client.sign_tab__id_by_process"
 READ_DOCS = "public.sign_read_for_doc"
 READ_GROUP = "public.sign_group_id_get_by_client_request"
 UPDATE_DOC = "sale.sign_document_upd"
-READ_AGREEMENTS = "public.parse_pdf__read_agreement"
-PROCESS_AGREEMENT = "public.parse_pdf__process_agreement"
 TERMINATE = "pg_catalog.pg_terminate_backend"
 SESSION_ALIVE = "pg_catalog.pg_stat_get_activity"
 OLD_SESSION = 4242
-WRITES = {INSERT_SIGN, MODIFY_SIGN, UPDATE_DOC, PROCESS_AGREEMENT}
+WRITES = {INSERT_SIGN, MODIFY_SIGN, UPDATE_DOC}
 
 KEY_INFO_PATH = "/pkcs12/info"
 SIGN_SAVE_PATH = "/cms/sign-save"
@@ -107,10 +102,6 @@ def fail_after_dry_run(error: Exception) -> Callable[[tuple[Any, ...]], list[dic
         return [{"insert_sign_general": NEW_SIGN_ID}]
 
     return answer
-
-
-def agreement_row(sign_id: int = 41, agreement_sum: Decimal | None = Decimal(1500000)) -> Any:
-    return {"sign_id": sign_id, "agreement_sum": agreement_sum}
 
 
 class Connection(FakeConnection):
@@ -203,8 +194,6 @@ class Database:
             READ_DOCS: [{"agreement_client_request_id": 88, "sign_cnt": 1}],
             READ_GROUP: [{"sign_group_id": UUID(GROUP)}],
             UPDATE_DOC: [{"sign_document_upd": 0}],
-            READ_AGREEMENTS: [agreement_row()],
-            PROCESS_AGREEMENT: [{"parse_pdf__process_agreement": 0}],
         }
         self.events: list[str] = []
         self.pending: list[tuple[str, tuple[Any, ...]]] = []

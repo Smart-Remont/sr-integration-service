@@ -148,18 +148,6 @@ class AutoSignRepository(BaseRepository):
             text_casts=(_INT, None, None, _BOOLEAN, _BOOLEAN),
         )
 
-    async def parse_pdf__read_agreement(self) -> SpRows:
-        return await self._read_cursor("public.parse_pdf__read_agreement")
-
-    async def parse_pdf__process_agreement(self, *, sign_id: int, is_ok: bool | None) -> None:
-        await self.call_sp(
-            "public.parse_pdf__process_agreement",
-            pdo_text(sign_id),
-            None if is_ok is None else _boolean_text(is_ok),
-            module_code=_MODULE_CODE,
-            text_casts=(_INT, _BOOLEAN),
-        )
-
     async def _read_cursor(self, function: str) -> SpRows:
         rows = await self.call_sp(function, cursor=True, module_code=_MODULE_CODE)
         return [pg_row(row) for row in rows]

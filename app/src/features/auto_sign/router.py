@@ -11,11 +11,10 @@ from src.php_compat.zend_request import php_route
 
 from .auth import (
     require_auto_sign_cron_auth,
-    require_partner_config,
     require_signing_config,
     require_upload_config,
 )
-from .deps import AgreementSumServiceDep, DocumentUploadServiceDep, OperatorSigningServiceDep
+from .deps import DocumentUploadServiceDep, OperatorSigningServiceDep
 from .openapi_examples import CRON_RESPONSES
 
 router = APIRouter(tags=["Auto signing (MyNCA)"], dependencies=[require_auto_sign_cron_auth])
@@ -58,21 +57,3 @@ async def cron_auto_upload_sign_doc(
     service: DocumentUploadServiceDep,
 ) -> Response:
     return await service.upload_signed_documents()
-
-
-@php_route(
-    router,
-    "/pdf-find-sum",
-    method="GET",
-    summary="Сверить сумму договора подрядчика с его PDF",
-    description=(
-        "Вызывает крон раз в 10 минут. Функции БД: `public.parse_pdf__read_agreement`, "
-        "`public.parse_pdf__process_agreement`. PDF читается из партнёрского сервиса."
-    ),
-    responses=CRON_RESPONSES,
-)
-async def pdf_find_sum(
-    _: Annotated[None, Depends(require_partner_config)],
-    service: AgreementSumServiceDep,
-) -> Response:
-    return await service.check_agreement_sums()

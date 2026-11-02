@@ -22,7 +22,6 @@ def test_key_is_the_first_eight_bytes_of_sha256_as_a_signed_bigint() -> None:
         (sign_process_lock_key("abc"), 3684406432042435101),
         (advisory_lock_key("auto-sign:cron-auto-sign-operator"), 1678123067878273961),
         (advisory_lock_key("auto-sign:cron-auto-upload-sign-doc"), -8439220147524191705),
-        (advisory_lock_key("auto-sign:pdf-find-sum"), 3439227168681252398),
     ],
 )
 def test_lock_keys_stay_the_same(key: int, literal: int) -> None:

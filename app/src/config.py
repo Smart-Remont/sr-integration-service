@@ -68,8 +68,6 @@ class AutoSignConfig:
     mynca_token: str = os.getenv("AUTO_SIGN_MYNCA_TOKEN", "").strip()
     # Decrypts nca.company_key_store_tab. In PHP: constants.master_key.
     master_key: str = os.getenv("AUTO_SIGN_MASTER_KEY", "")
-    # Partner backend, includes /partner. pdf-find-sum reads signed agreements from it.
-    partner_url: str = _url_env("AUTO_SIGN_PARTNER_URL")
 
     @property
     def signing_is_configured(self) -> bool:

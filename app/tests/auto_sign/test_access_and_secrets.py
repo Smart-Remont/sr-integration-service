@@ -27,7 +27,6 @@ from tests.auto_sign.fakes import (
     MYNCA_TOKEN,
     OPERATOR_ROUTE,
     PDF_BYTES,
-    PDF_ROUTE,
     READ_KEY,
     READ_ROWS,
     ROLLBACK_PATH,
@@ -40,7 +39,7 @@ from tests.auto_sign.fakes import (
     fail_after_dry_run,
 )
 
-ROUTES = [OPERATOR_ROUTE, UPLOAD_ROUTE, PDF_ROUTE]
+ROUTES = [OPERATOR_ROUTE, UPLOAD_ROUTE]
 SECRETS = [
     MASTER_KEY,
     KEY_BASE64,
@@ -105,7 +104,6 @@ async def test_missing_cron_credentials_are_503(
         (UPLOAD_ROUTE, auto_sign_config, "mynca_token"),
         (UPLOAD_ROUTE, minio_config, "endpoint"),
         (UPLOAD_ROUTE, minio_config, "access_key"),
-        (PDF_ROUTE, auto_sign_config, "partner_url"),
     ],
 )
 async def test_missing_configuration_is_503_and_runs_nothing(
@@ -131,7 +129,7 @@ def test_env_example_leaves_every_auto_sign_value_empty() -> None:
     example = Path(__file__).parents[2] / ".env.example"
     lines = [line for line in example.read_text().splitlines() if line.startswith("AUTO_SIGN_")]
 
-    assert len(lines) == 6
+    assert len(lines) == 5
     assert all(line.endswith("=") for line in lines)
 
 
@@ -139,9 +137,7 @@ def test_env_example_leaves_every_auto_sign_value_empty() -> None:
     ("route", "other_config"),
     [
         (OPERATOR_ROUTE, (minio_config, "endpoint")),
-        (OPERATOR_ROUTE, (auto_sign_config, "partner_url")),
-        (PDF_ROUTE, (auto_sign_config, "master_key")),
-        (PDF_ROUTE, (auto_sign_config, "mynca_token")),
+        (UPLOAD_ROUTE, (auto_sign_config, "master_key")),
     ],
 )
 async def test_a_route_needs_only_its_own_configuration(

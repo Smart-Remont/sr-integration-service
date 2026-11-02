@@ -19,7 +19,6 @@ from src.database.pool import get_db_pool
 from src.features.auto_sign import document_upload, operator_signing
 from src.features.auto_sign.deps import (
     get_auto_sign_mynca,
-    get_partner_transport,
     get_signing_failure_brake,
 )
 from src.features.auto_sign.failure_brake import SigningFailureBrake
@@ -33,7 +32,6 @@ from tests.auto_sign.fakes import (
     MASTER_KEY,
     MYNCA_TOKEN,
     MYNCA_URL,
-    PARTNER_URL,
     Database,
     Mynca,
 )
@@ -47,7 +45,6 @@ def configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auto_sign_config, "mynca_base_url", MYNCA_URL)
     monkeypatch.setattr(auto_sign_config, "mynca_token", MYNCA_TOKEN)
     monkeypatch.setattr(auto_sign_config, "master_key", MASTER_KEY)
-    monkeypatch.setattr(auto_sign_config, "partner_url", PARTNER_URL)
     monkeypatch.setattr(minio_config, "endpoint", "https://minio.test")
     monkeypatch.setattr(minio_config, "access_key", "minio-access")
     monkeypatch.setattr(minio_config, "secret_key", "minio-secret")
@@ -63,28 +60,9 @@ def mynca(db: Database) -> Mynca:
     return Mynca(db)
 
 
-class Partner:
-    """The partner backend of ``pdf-find-sum``."""
-
-    def __init__(self) -> None:
-        self.urls: list[str] = []
-        self.answer: httpx.Response | Exception = httpx.Response(200, content=b"not a pdf")
-
-    def handle(self, request: httpx.Request) -> httpx.Response:
-        self.urls.append(str(request.url))
-        if isinstance(self.answer, Exception):
-            raise self.answer
-        return self.answer
-
-
 @pytest.fixture
 def brake() -> SigningFailureBrake:
     return SigningFailureBrake()
-
-
-@pytest.fixture
-def partner() -> Partner:
-    return Partner()
 
 
 class Storage:
@@ -109,7 +87,6 @@ def storage(monkeypatch: pytest.MonkeyPatch) -> Storage:
 async def client(
     db: Database,
     mynca: Mynca,
-    partner: Partner,
     brake: SigningFailureBrake,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
@@ -124,7 +101,6 @@ async def client(
         transport=httpx.MockTransport(mynca.handle),
     )
     app.dependency_overrides[get_signing_failure_brake] = lambda: brake
-    app.dependency_overrides[get_partner_transport] = lambda: httpx.MockTransport(partner.handle)
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

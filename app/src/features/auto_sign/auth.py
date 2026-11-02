@@ -23,11 +23,3 @@ def require_upload_config() -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Загрузка подписанных документов не настроена",
         )
-
-
-def require_partner_config() -> None:
-    if not auto_sign_config.partner_url:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Адрес партнёрского сервиса не настроен",
-        )
