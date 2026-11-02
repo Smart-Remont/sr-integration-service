@@ -24,14 +24,6 @@ SEND_QUEUE_RESPONSES: dict[int | str, dict[str, object]] = {
     **_COMMON,
     503: _NOT_CONFIGURED,
 }
-PROVIDER_REQUESTS_RESPONSES: dict[int | str, dict[str, object]] = {
-    200: {
-        "description": "Пусто, после всех поставщиков. Запуск идёт около 10 минут",
-        "content": {"application/json; text/html; charset=utf-8": {}},
-    },
-    **_COMMON,
-    503: _NOT_CONFIGURED,
-}
 PAID_REQUESTS_RESPONSES: dict[int | str, dict[str, object]] = {
     200: {
         "description": "Результат функции. Ошибка функции тоже идёт кодом 200, `status: false`",

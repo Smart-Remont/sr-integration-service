@@ -23,7 +23,7 @@ class MailingFunctionsService:
         self.repository = repository
 
     async def fill_send_email(self) -> Response:
-        """PHP also adds a row to ``send_error_tab`` on a failure. See STATUS.md, the owner decides."""
+        """PHP also adds a row to ``send_error_tab`` on a failure: nothing reads that table."""
         if not await self._take_lock(FILL_LOCK):
             return cron_response()
         try:

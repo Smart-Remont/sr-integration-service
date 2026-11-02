@@ -9,7 +9,6 @@ from src.database.pool import get_db_pool
 from src.shared.cron_run import held_run_connection
 
 from .letter_queue import MailingQueueService
-from .provider_files import ProviderFilesService
 from .repo import MailingRepository
 from .service import MailingFunctionsService
 from .smtp import SmtpTransport
@@ -42,17 +41,9 @@ def get_queue_service(
     )
 
 
-def get_provider_files_service(connection: _Connection) -> ProviderFilesService:
-    return ProviderFilesService(
-        repository=MailingRepository(connection=connection),
-        public_dir=mailing_config.office_public_dir,
-    )
-
-
 def get_functions_service(connection: _Connection) -> MailingFunctionsService:
     return MailingFunctionsService(repository=MailingRepository(connection=connection))
 
 
 MailingQueueServiceDep = Annotated[MailingQueueService, Depends(get_queue_service)]
-ProviderFilesServiceDep = Annotated[ProviderFilesService, Depends(get_provider_files_service)]
 MailingFunctionsServiceDep = Annotated[MailingFunctionsService, Depends(get_functions_service)]

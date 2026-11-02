@@ -103,12 +103,7 @@ class MailingConfig:
     # A copy of the letters ``EXPEDITOR_CODE_ACCEPT``.
     expeditor_cc_address: str = os.getenv("MAILING_EXPEDITOR_CC_ADDRESS", "").strip()
     expeditor_cc_name: str = os.getenv("MAILING_EXPEDITOR_CC_NAME", "")
-    # Letters about database errors go from another mailbox, written in the PHP code. After a failed
-    # letter PHP logs in to this mailbox with its password.
-    error_from_address: str = os.getenv("MAILING_ERROR_FROM_ADDRESS", "").strip()
-    error_from_name: str = os.getenv("MAILING_ERROR_FROM_NAME", "")
-    error_smtp_password: str = os.getenv("MAILING_ERROR_SMTP_PASSWORD", "")
-    # ``$_SERVER['DOCUMENT_ROOT']`` of Office: attachments are read from it, provider PDFs go to it.
+    # ``$_SERVER['DOCUMENT_ROOT']`` of Office: attachments are read from it.
     office_public_dir: str = os.getenv("MAILING_OFFICE_PUBLIC_DIR", "").strip()
 
     @property
@@ -123,15 +118,6 @@ class MailingConfig:
             and self.link_base_url
             and self.expeditor_cc_address
             and self.office_public_dir
-        )
-
-    @property
-    def error_queue_is_configured(self) -> bool:
-        return bool(
-            self.smtp_is_configured
-            and self.error_from_address
-            and self.error_from_name
-            and self.error_smtp_password
         )
 
 

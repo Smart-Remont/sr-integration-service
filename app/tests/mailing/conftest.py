@@ -18,7 +18,6 @@ from tests.mailing.fakes import (
     CRON_HEADERS,
     CRON_PASSWORD,
     CRON_USER,
-    ERROR_FROM_ADDRESS,
     FROM_ADDRESS,
     LINK_BASE,
     Database,
@@ -39,9 +38,6 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "link_base_url": LINK_BASE,
         "expeditor_cc_address": CC_ADDRESS,
         "expeditor_cc_name": "Копия",
-        "error_from_address": ERROR_FROM_ADDRESS,
-        "error_from_name": "SR",
-        "error_smtp_password": "error-pass",
         "office_public_dir": str(tmp_path),
     }
     for name, value in values.items():

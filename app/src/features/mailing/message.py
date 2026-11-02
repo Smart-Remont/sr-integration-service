@@ -57,7 +57,7 @@ def compose_letter(
     *,
     from_address: str,
     from_name: str,
-    to: Sequence[str],
+    to: str,
     subject: str | None,
     html: str,
     attachments: Sequence[MailAttachment] = (),
@@ -66,12 +66,11 @@ def compose_letter(
     now: datetime | None = None,
 ) -> ComposedLetter:
     sender = _filter_address(from_address)
-    addressees = [_filter_address(item) for item in to]
-    recipients = dict.fromkeys(addressees)
+    addressee = _filter_address(to)
+    recipients = {addressee: None}
     headers = {name: _encode_header(_filter_other(value)) for name, value in extra_headers}
     headers["From"] = _format_address(sender, from_name)
-    if addressees:
-        headers["To"] = ",\n ".join(addressees)
+    headers["To"] = addressee
     if carbon_copy is not None:
         address = _filter_address(carbon_copy[0])
         headers["Cc"] = _format_address(address, carbon_copy[1])

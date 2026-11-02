@@ -1,4 +1,4 @@
-"""``send-email-new`` and ``send-email-error-db``: the queues of letters.
+"""``send-email-new``: the queue of letters.
 
 Same as PHP: the order of calls, a connection for a run, the links, one letter per address, a failure
 recorded on the row and printed in the answer.
@@ -28,11 +28,10 @@ from fastapi import Response
 from loguru import logger
 
 from src.config import MailingConfig
-from src.php_compat.pdo_errors import php_error_state, php_pdo_message
 from src.php_compat.text import php_trim
 from src.repository.base import SpRow
 
-from .message import ComposedLetter, MailAttachment, MailCompositionError, compose_letter
+from .message import MailAttachment, MailCompositionError, compose_letter
 from .repo import MailingRepository
 from .responses import cron_response
 from .smtp import SmtpError, SmtpSettings, SmtpTimeoutError, SmtpTransport
@@ -48,7 +47,6 @@ _CLIENT = "CLIENT"
 # A refusal with this code means a dead mailbox: PHP takes it off the list for good.
 _UNSUBSCRIBE_CODE = 504
 QUEUE_LOCK = "send-email-new"
-ERROR_QUEUE_LOCK = "send-email-error-db"
 
 
 class _RunStoppedError(Exception):
@@ -81,33 +79,6 @@ class MailingQueueService:
             logger.error("send-email-new stopped: the database is gone")
         except _RunStoppedError:
             logger.error("send-email-new stopped: the mail server does not answer")
-        finally:
-            await transport.close()
-        return cron_response(bytes(output))
-
-    async def send_error_queue(self) -> Response:
-        if not await self.steps.take_lock(ERROR_QUEUE_LOCK):
-            return cron_response()
-        output = bytearray()
-        try:
-            rows = await self.steps.write(
-                "read_send_error", lambda repository: repository.read_send_error()
-            )
-        except DatabaseGoneError:
-            raise
-        except Exception as exc:
-            # PHP prints the error of its read and stops.
-            logger.error("read_send_error failed: {error}", error=php_error_state(exc))
-            output += _pdo_text(exc)
-            return cron_response(bytes(output))
-        transport = self.transport_factory(self._notify_settings())
-        try:
-            for row in rows:
-                transport = await self._send_error_row(row, transport, output)
-        except DatabaseGoneError:
-            logger.error("send-email-error-db stopped: the database is gone")
-        except _RunStoppedError:
-            logger.error("send-email-error-db stopped: the mail server does not answer")
         finally:
             await transport.close()
         return cron_response(bytes(output))
@@ -214,7 +185,7 @@ class MailingQueueService:
             letter = compose_letter(
                 from_address=config.smtp_username,
                 from_name=config.from_name,
-                to=[address],
+                to=address,
                 carbon_copy=carbon_copy,
                 subject=_optional_text(row.get("email_title")),
                 html=html,
@@ -280,79 +251,6 @@ class MailingQueueService:
             ),
         )
 
-    async def _send_error_row(
-        self,
-        row: SpRow,
-        transport: SmtpTransport,
-        output: bytearray,
-    ) -> SmtpTransport:
-        """A failed letter of this queue switches to the mailbox the letters go from, as in PHP."""
-        send_error_id = row["send_error_id"]
-        config = self.config
-        addressees = [
-            php_trim(piece) for piece in _text(row.get("email")).split(";") if php_trim(piece) != ""
-        ]
-        letter = _composed_error_letter(row, addressees, config)
-        await self._mark_error_sent(send_error_id)
-        try:
-            if isinstance(letter, str):
-                raise SmtpError(letter)
-            await transport.send(letter)
-        except SmtpError as exc:
-            message = exc.message
-            output += message.encode("utf-8", "replace")
-            await self.steps.value_or(
-                "upd_error_send_failed",
-                None,
-                lambda repository: repository.upd_error_send_failed(send_error_id, message),
-            )
-            if isinstance(exc, SmtpTimeoutError):
-                raise _RunStoppedError from exc
-            await transport.close()
-            return self.transport_factory(
-                SmtpSettings(
-                    config.smtp_host,
-                    config.smtp_port,
-                    config.error_from_address,
-                    config.error_smtp_password,
-                )
-            )
-        logger.info("send_error {id}: sent", id=send_error_id)
-        return transport
-
-    async def _mark_error_sent(self, send_error_id: object) -> None:
-        try:
-            await self.steps.write(
-                "upd_error_send",
-                lambda repository: repository.upd_error_send(send_error_id),
-            )
-            logger.info("send_error {id}: marked", id=send_error_id)
-        except DatabaseGoneError:
-            raise
-        except Exception as exc:
-            logger.error(
-                "upd_error_send {id} failed, letter not sent, run stopped: {error}",
-                id=send_error_id,
-                error=type(exc).__name__,
-            )
-            raise DatabaseGoneError("upd_error_send") from exc
-
-
-def _composed_error_letter(
-    row: SpRow, addressees: Sequence[str], config: MailingConfig
-) -> ComposedLetter | str:
-    """A letter, or the text of the failure when it cannot be composed."""
-    try:
-        return compose_letter(
-            from_address=config.error_from_address,
-            from_name=config.error_from_name,
-            to=addressees,
-            subject=_optional_text(row.get("email_title")),
-            html=_text(row.get("email_content")),
-        )
-    except MailCompositionError as exc:
-        return str(exc)
-
 
 async def _read_public_file(root: str, file_url: str) -> bytes:
     """``file_get_contents(DOCUMENT_ROOT . file_url)``. No file: an empty attachment, as in PHP.
@@ -380,7 +278,3 @@ def _text(value: object) -> str:
 
 def _optional_text(value: object) -> str | None:
     return None if value is None else str(value)
-
-
-def _pdo_text(exc: Exception) -> bytes:
-    return php_pdo_message(exc).encode("utf-8", "surrogateescape")

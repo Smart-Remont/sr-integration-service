@@ -30,15 +30,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # OpenCV (KL plan cropping) needs these at runtime even in the headless build.
-# wkhtmltopdf: the provider tables of /api/mailing, as in PHP. Debian 13 no longer has the package, so it
-# comes from the releases of the project. It needs no X server: this build has its own patched Qt.
-ADD --checksum=sha256:98ba0d157b50d36f23bd0dedf4c0aa28c7b0c50fcdcdc54aa5b6bbba81a3941d \
-    https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb \
-    /tmp/wkhtmltox.deb
-
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libglib2.0-0 libgomp1 /tmp/wkhtmltox.deb \
-    && rm -rf /var/lib/apt/lists/* /tmp/wkhtmltox.deb
+    && apt-get install -y --no-install-recommends libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --no-create-home --uid 10001 app
 

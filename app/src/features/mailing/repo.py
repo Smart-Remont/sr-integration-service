@@ -71,38 +71,6 @@ class MailingRepository(BaseRepository):
     async def upd_email_send_failed(self, send_email_id: object, error: str) -> None:
         await self._scalar("public.upd_email_send_failed", send_email_id, STATE_FAILED, error)
 
-    async def read_send_error(self) -> SpRows:
-        return await self._read("public.read_send_error")
-
-    async def upd_error_send(self, send_error_id: object) -> None:
-        await self._scalar("public.upd_error_send", send_error_id, STATE_SENT)
-
-    async def upd_error_send_failed(self, send_error_id: object, error: str) -> None:
-        await self._scalar("public.upd_error_send_failed", send_error_id, STATE_FAILED, error)
-
-    async def read_provider_for_unload(self) -> SpRows:
-        return await self._read("provider.read_provider_for_unload")
-
-    async def read_provider_request_remont_unload(
-        self, status_code: str, provider_id: object
-    ) -> SpRows:
-        return await self._read(
-            "provider.read_provider_request_remont_unload", status_code, provider_id
-        )
-
-    async def insert_provider_send_email(self, provider_id: object, email: object) -> object | None:
-        return await self._scalar("provider.insert_provider_send_email", provider_id, email)
-
-    async def insert_provider_send_email_attachment(
-        self, provider_send_email_id: object, name: str, url: str
-    ) -> None:
-        await self._scalar(
-            "provider.insert_provider_send_email_attachment",
-            provider_send_email_id,
-            name,
-            url,
-        )
-
     async def change_paid_client_request_to_remont(self) -> object | None:
         return await self._scalar("public.change_paid_client_request_to_remont")
 

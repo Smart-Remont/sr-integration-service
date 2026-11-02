@@ -13,7 +13,6 @@ from tests.big_integration.fakes import FakeConnection
 CRON_USER = "cron-user"
 CRON_PASSWORD = "cron-password"
 FROM_ADDRESS = "notify@test.invalid"
-ERROR_FROM_ADDRESS = "orders@test.invalid"
 CC_ADDRESS = "copy@test.invalid"
 LINK_BASE = "https://office.test"
 
@@ -27,16 +26,9 @@ TOKEN = "public.email_get_remont_token"
 HARD = "public.email_unsubscribe_hard"
 MARK = "public.upd_email_send"
 FAILED = "public.upd_email_send_failed"
-READ_ERRORS = "public.read_send_error"
-MARK_ERROR = "public.upd_error_send"
-FAILED_ERROR = "public.upd_error_send_failed"
 FILL = "public.fill_send_email"
 PAID = "public.change_paid_client_request_to_remont"
 NOTICE = "public.get_session_notice"
-PROVIDERS = "provider.read_provider_for_unload"
-PROVIDER_TABLE = "provider.read_provider_request_remont_unload"
-QUEUE_PROVIDER = "provider.insert_provider_send_email"
-QUEUE_FILE = "provider.insert_provider_send_email_attachment"
 
 
 def basic(user: str, password: str) -> str:
@@ -107,16 +99,9 @@ class Database:
             HARD: [{"id": 0}],
             MARK: [{"id": 1}],
             FAILED: [{"id": 1}],
-            READ_ERRORS: [],
-            MARK_ERROR: [{"id": 1}],
-            FAILED_ERROR: [{"id": 1}],
             FILL: [{"id": 0}],
             PAID: [{"id": 0}],
             NOTICE: [{"id": ""}],
-            PROVIDERS: [],
-            PROVIDER_TABLE: [],
-            QUEUE_PROVIDER: [{"id": 555}],
-            QUEUE_FILE: [{"id": 0}],
         }
         self.events: list[str] = []
         self.open_transactions = 0

@@ -19,7 +19,7 @@ def _letter(**fields: object) -> bytes:
     values: dict[str, object] = {
         "from_address": "from@test.invalid",
         "from_name": "Name",
-        "to": ["to@test.invalid"],
+        "to": "to@test.invalid",
         "subject": "Subject",
         "html": "<p>x</p>",
         "now": NOW,
@@ -62,7 +62,7 @@ def test_long_subject_breaks_only_at_an_encoded_space() -> None:
 
 def test_header_values_are_cleaned_as_in_zend() -> None:
     letter = _letter(
-        to=['a"b<c>,d\r\n@test.invalid'],
+        to='a"b<c>,d\r\n@test.invalid',
         subject="a\tb\r\nc",
         from_name='Na"me <x>',
     )
@@ -93,7 +93,7 @@ def test_attachments_make_it_multipart_with_the_body_headers_on_top() -> None:
     letter = compose_letter(
         from_address="from@test.invalid",
         from_name="Name",
-        to=["to@test.invalid"],
+        to="to@test.invalid",
         subject="Subject",
         html="<p>x</p>",
         attachments=[MailAttachment("Файл.pdf", b"abc"), MailAttachment(None, b"")],
@@ -139,7 +139,7 @@ def test_copy_goes_after_the_addressee_and_is_not_doubled() -> None:
     letter = compose_letter(
         from_address="from@test.invalid",
         from_name="Name",
-        to=["to@test.invalid"],
+        to="to@test.invalid",
         subject="Subject",
         html="x",
         carbon_copy=("to@test.invalid", "Копия"),
