@@ -7,14 +7,12 @@ from asyncpg.exceptions import RaiseError
 from httpx import AsyncClient
 
 from src.features.auto_sign.failure_brake import PAUSE_SECONDS, SigningFailureBrake
-from src.features.auto_sign.operator_signing import OperatorSigningService
-from src.features.auto_sign.repo import AutoSignRepository
+from src.features.auto_sign.mynca_signature import MyncaSignature
 from src.shared.mynca_client import MyncaClient
 from tests.auto_sign.fakes import (
     FIND_SIGN,
     INSERT_SIGN,
     LOCK,
-    MASTER_KEY,
     MODIFY_SIGN,
     MYNCA_TOKEN,
     MYNCA_URL,
@@ -161,15 +159,10 @@ async def test_cancellation_during_sign_save_is_logged_and_passes_through(
     db: Database,
     log_lines: list[str],
 ) -> None:
-    service = OperatorSigningService(
-        AutoSignRepository(connection=db.route),
-        CancelledOnSignSave(),
-        MASTER_KEY,
-        SigningFailureBrake(),
-    )
+    signatures = MyncaSignature(CancelledOnSignSave(), SigningFailureBrake())
 
     with pytest.raises(asyncio.CancelledError):
-        await service._post_cms_sign_save(SIGN_ID, 501, {})
+        await signatures._post_cms_sign_save(SIGN_ID, 501, {})
 
     assert any(
         line.startswith("CRITICAL") and "cancelled" in line and f"sign_id={SIGN_ID}" in line

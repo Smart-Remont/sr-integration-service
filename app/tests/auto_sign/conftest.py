@@ -16,7 +16,7 @@ from src.config import (
     minio_config,
 )
 from src.database.pool import get_db_pool
-from src.features.auto_sign import document_upload, operator_signing
+from src.features.auto_sign import document_upload, signature_record
 from src.features.auto_sign.deps import (
     get_auto_sign_mynca,
     get_signing_failure_brake,
@@ -120,8 +120,8 @@ def log_lines() -> Iterator[list[str]]:
 
 @pytest.fixture
 def short_read_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(operator_signing, "READ_BACK_SECONDS", 0.05)
-    monkeypatch.setattr(operator_signing, "READ_BACK_PAUSE_SECONDS", 0.01)
+    monkeypatch.setattr(signature_record, "READ_BACK_SECONDS", 0.05)
+    monkeypatch.setattr(signature_record, "READ_BACK_PAUSE_SECONDS", 0.01)
 
 
 @pytest.fixture

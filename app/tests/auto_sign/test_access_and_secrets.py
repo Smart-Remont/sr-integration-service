@@ -9,7 +9,7 @@ from asyncpg.exceptions import DataError, RaiseError
 from httpx import AsyncClient
 
 from src.config import app_config, auto_sign_config, auto_sign_cron_auth_config, minio_config
-from src.features.auto_sign.operator_signing import _CompanyKey
+from src.features.auto_sign.company_key import CompanyKey
 from src.shared.mynca_client import MyncaAnswer
 from tests.auto_sign.fakes import (
     CLIENT_FILE_PATH,
@@ -179,8 +179,8 @@ async def test_no_free_connection_in_time_is_503(
 
 
 def test_company_key_repr_hides_the_key() -> None:
-    assert KEY_PASSWORD not in repr(_CompanyKey(KEY_BASE64, KEY_PASSWORD))
-    assert KEY_BASE64 not in repr(_CompanyKey(KEY_BASE64, KEY_PASSWORD))
+    assert KEY_PASSWORD not in repr(CompanyKey(KEY_BASE64, KEY_PASSWORD))
+    assert KEY_BASE64 not in repr(CompanyKey(KEY_BASE64, KEY_PASSWORD))
 
 
 def test_mynca_answer_repr_hides_the_document() -> None:
