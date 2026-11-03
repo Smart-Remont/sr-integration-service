@@ -7,8 +7,12 @@ _ENVELOPE_ERROR = {
 }
 
 
+_UNAUTHORIZED = {"description": "Нет учётки Basic или она неверная. Тело пустое, как в PHP"}
+
+
 def _responses(data: object) -> dict[int | str, dict[str, object]]:
     return {
+        401: _UNAUTHORIZED,
         200: {
             "description": "Успех",
             "content": {
@@ -81,6 +85,7 @@ PLACEMENT_PRESET_BODY = json_body(
     {"placementUUID": "c0f17482-ca65-4e58-8446-d1b155f45945", "preset_id": 428},
 )
 BIG_NOTIFY_CLIENT_RESPONSES = {
+    401: _UNAUTHORIZED,
     200: {
         "description": "Успех",
         "content": {
@@ -106,6 +111,7 @@ BIG_NOTIFY_CLIENT_RESPONSES = {
 
 def _response_json_responses(data: object) -> dict[int | str, dict[str, object]]:
     return {
+        401: _UNAUTHORIZED,
         200: {
             "description": "Успех",
             "content": {

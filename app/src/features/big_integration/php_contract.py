@@ -15,6 +15,7 @@ from src.php_compat.json_codec import php_json_encode, php_json_encode_pretty
 from src.php_compat.pdo_errors import php_error_state, php_refusal_log_level
 from src.php_compat.responses import PHP_HTML_CONTENT_TYPE, PHP_WWW_AUTHENTICATE
 from src.security import verify_basic_credentials
+from src.security.shown_login import shown_basic
 
 from .errors import BigIntegrationDatabaseError
 
@@ -130,7 +131,14 @@ def register_big_integration_handlers(app: FastAPI) -> None:
     app.add_exception_handler(BigIntegrationUnauthorizedError, unauthorized)
 
 
-async def _require_php_basic_auth(request: Request) -> None:
+_SHOWN_LOGIN = shown_basic(
+    "BiGroupBasic",
+    "Basic как в PHP: учётка `INTEGRATION_HS_BI_*`. Нет заголовка, он неверный или схема написана "
+    "не как `Basic` с большой буквы: 401 с пустым телом.",
+)
+
+
+async def _require_php_basic_auth(request: Request, _: Annotated[None, _SHOWN_LOGIN]) -> None:
     credentials = await php_basic_credentials(request)
     if credentials is None:
         raise BigIntegrationUnauthorizedError

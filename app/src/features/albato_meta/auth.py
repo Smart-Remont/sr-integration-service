@@ -1,4 +1,5 @@
 import secrets
+from typing import Annotated
 
 from fastapi import Request, status
 from loguru import logger
@@ -7,6 +8,7 @@ from src.database.deps import CommitBeforeResponseConnectionDep
 from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.text import php_trim
 from src.php_compat.zend_request import PhpParam, php_raw_body, read_params
+from src.security.shown_login import shown_address_value
 
 from .errors import AlbatoMetaError
 from .repo import AlbatoMetaRepository
@@ -16,9 +18,18 @@ _NOT_SET_TEXT = "Не задан токен интеграции"
 _WRONG_VALUE_TEXT = "Неверный токен"
 
 
+_SHOWN_LOGIN = shown_address_value(
+    "AlbatoToken",
+    _PARAM_NAME,
+    "Токен в адресе, так настроено у Albato. Сверка с настройкой `ALBATO_META_TOKEN` в БД. Неверный: "
+    "401. Настройка пуста: 503.",
+)
+
+
 async def require_albato_meta_token(
     request: Request,
     connection: CommitBeforeResponseConnectionDep,
+    _: Annotated[None, _SHOWN_LOGIN],
 ) -> None:
     """The token of PHP: a value in the address, checked against ``ALBATO_META_TOKEN`` in the database.
 

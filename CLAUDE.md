@@ -55,6 +55,7 @@ app/
     ├── repository/base.py       BaseRepository: call_sp(), committed(), scalar_from_sp_rows()
     ├── exceptions/              ошибки БД → HTTP (409/422/500), текст из RAISE '{…}'
     ├── security/basic_auth.py   basic_auth_dependency() — единственная реализация Basic Auth
+    │   └── shown_login.py       вход, который видит только Scalar, у маршрутов PHP со своей проверкой. Ничего не проверяет
     ├── integration_context/     JWT X-Integration-Context от прокси CRM (сотрудник, scope, заявка)
     ├── shared/                  общая логика нескольких интеграций: deal_guard, клиент MyNCA, ключ advisory-блокировки,
     │                            cron_run (соединение запуска, CronRepository, предел шага, сигнал остановки),

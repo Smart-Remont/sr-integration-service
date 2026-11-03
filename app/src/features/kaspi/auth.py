@@ -4,10 +4,21 @@ from typing import Annotated
 from fastapi import Header, HTTPException, status
 
 from src.config import kaspi_proxy_config
+from src.security.shown_login import shown_header
+
+_SHOWN_LOGIN = shown_header(
+    "KaspiProxyHeader",
+    "X-Kaspi-Proxy-Secret",
+    "Ставит nginx, у которого список адресов Kaspi: сам Kaspi запросы не подписывает. Сверка с "
+    "`KASPI_PROXY_SECRET`. Нет или неверный: 403. Нет настройки: 503.",
+)
 
 
 async def require_kaspi_proxy_secret(
-    secret: Annotated[str | None, Header(alias="X-Kaspi-Proxy-Secret")] = None,
+    _: Annotated[None, _SHOWN_LOGIN],
+    secret: Annotated[
+        str | None, Header(alias="X-Kaspi-Proxy-Secret", include_in_schema=False)
+    ] = None,
 ) -> None:
     """Kaspi does not sign requests, so only nginx, with its address list, may reach the route."""
     expected = kaspi_proxy_config.secret

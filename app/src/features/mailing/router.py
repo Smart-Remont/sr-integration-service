@@ -17,7 +17,7 @@ from .openapi_examples import (
     SEND_QUEUE_RESPONSES,
 )
 
-router = APIRouter(tags=["Рассылки и кроны"], dependencies=[require_mailing_cron_auth])
+router = APIRouter(tags=["Mailing and service crons"], dependencies=[require_mailing_cron_auth])
 
 
 @php_route(
@@ -27,6 +27,7 @@ router = APIRouter(tags=["Рассылки и кроны"], dependencies=[requir
     summary="Заполнить очередь писем",
     description="Вызывает крон раз в 8 минут. Функция БД: `public.fill_send_email`.",
     responses=FILL_SEND_EMAIL_RESPONSES,
+    response_class=Response,
 )
 async def fill_send_email(service: MailingFunctionsServiceDep) -> Response:
     return await service.fill_send_email()
@@ -45,6 +46,7 @@ async def fill_send_email(service: MailingFunctionsServiceDep) -> Response:
         "отправки: письмо не уйдёт дважды."
     ),
     responses=SEND_QUEUE_RESPONSES,
+    response_class=Response,
 )
 async def send_email_new(
     _: Annotated[None, Depends(require_queue_config)],
@@ -58,7 +60,12 @@ async def send_email_new(
     "/paid-client-request-to-remont",
     method="GET",
     summary="Создать ремонты по оплаченным заявкам",
-    description="Вызывает крон раз в день. Функция БД: `public.change_paid_client_request_to_remont`.",
+    description=(
+        "Вызывает крон раз в день. Письма здесь ни при чём: создаёт ремонты и меняет заявки в базе, "
+        "поэтому повторный вызов не безобиден. Функция БД: "
+        "`public.change_paid_client_request_to_remont`. Лежит в `mailing`: в PHP был в том же "
+        "контроллере."
+    ),
     responses=PAID_REQUESTS_RESPONSES,
 )
 async def paid_client_request_to_remont(service: MailingFunctionsServiceDep) -> Response:

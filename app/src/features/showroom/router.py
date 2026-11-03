@@ -26,6 +26,7 @@ router = APIRouter(tags=["Showroom (BI Group)"], dependencies=[require_showroom_
         "уходит POST на `SHOWROOM_BI_URL`. Ответ BI Group отдаётся как есть, код всегда 200."
     ),
     responses=SHOWROOM_INFO_LIST_RESPONSES,
+    response_class=Response,
 )
 async def showroom_info_list(
     _: Annotated[None, Depends(require_showroom_bi_config)],
