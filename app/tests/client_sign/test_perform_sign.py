@@ -2,13 +2,14 @@
 
 import base64
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
 from asyncpg.exceptions import RaiseError
 from httpx import AsyncClient
 
-from src.config import ClientSignConfig
+from src.config import ClientSignConfig, app_config
 from src.features.client_sign.callback_key import callback_key
 from tests.client_sign.fakes import CONFIG, FakeConnection, Partners, install_overrides
 
@@ -275,3 +276,19 @@ async def test_agreement_and_statement_identify_their_own_document(
     assert payload["back_url"].endswith(
         callback_key(CONFIG.callback_secret, "OTBASY_STATEMENT_SIGN", 3)
     )
+
+
+async def test_mynca_token_does_not_go_without_tls_on_production(
+    client: AsyncClient,
+    connection: FakeConnection,
+    partners: Partners,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_config, "env", "prod")
+    install_overrides(connection, partners, replace(CONFIG, mynca_base_url="http://mynca.test/api"))
+
+    response = await client.get(f"{ROUTE}/uuid/u-1/doc_type/ds/hash/h-1")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "CLIENT_SIGN_MYNCA_BASE_URL не https"}
+    assert partners.requests == []

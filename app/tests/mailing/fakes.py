@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from src.features.mailing.message import ComposedLetter
-from src.features.mailing.smtp import SmtpError, SmtpSettings
+from src.features.mailing.smtp import SmtpError, SmtpSessionError, SmtpSettings
 from tests.big_integration.fakes import FakeConnection
 
 CRON_USER = "cron-user"
@@ -133,6 +133,8 @@ class MailServer:
         self.closed = 0
         self.transactions_during_sending: list[int] = []
         self.hangs = False
+        self.sessions_opened = 0
+        self.refuse_session: SmtpSessionError | None = None
 
     def transport_class(self) -> type[Any]:
         server = self
@@ -140,6 +142,12 @@ class MailServer:
         class FakeTransport:
             def __init__(self, settings: SmtpSettings) -> None:
                 server.settings.append(settings)
+
+            async def open_session(self) -> None:
+                server.database.events.append("session")
+                if server.refuse_session is not None:
+                    raise server.refuse_session
+                server.sessions_opened += 1
 
             async def send(self, letter: ComposedLetter) -> None:
                 server.attempts += 1

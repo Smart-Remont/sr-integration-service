@@ -12,7 +12,7 @@ from loguru import logger
 
 from src.config import big_integration_auth_config
 from src.php_compat.json_codec import php_json_encode, php_json_encode_pretty
-from src.php_compat.pdo_errors import is_php_unhandled_error
+from src.php_compat.pdo_errors import is_php_unhandled_error, php_error_state
 from src.php_compat.responses import PHP_HTML_CONTENT_TYPE
 from src.security import verify_basic_credentials
 
@@ -114,9 +114,9 @@ def register_big_integration_handlers(app: FastAPI) -> None:
         level = "ERROR" if is_php_unhandled_error(exc.message) else "INFO"
         logger.log(
             level,
-            "BIG route {path}: database error: {error}",
+            "BIG route {path}: database error, state {state}",
             path=request.url.path,
-            error=exc.message,
+            state=php_error_state(exc),
         )
         return php_error_response(exc.message)
 

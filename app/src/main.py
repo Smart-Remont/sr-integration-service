@@ -16,6 +16,7 @@ from src.features.kaspi.errors import register_kaspi_handlers
 from src.log_setup import configure_logging
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
+from src.shared.cron_run import install_run_stop_signal
 
 configure_logging()
 
@@ -23,6 +24,7 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await init_db_pool()
+    install_run_stop_signal()
     yield
     await close_db_pool()
 

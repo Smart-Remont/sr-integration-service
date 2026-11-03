@@ -97,7 +97,7 @@ class BaseRepository:
         # Transaction-local (is_local = true): pooled connections are reused by other
         # requests, so a session-level value would leak this user into their audit trail.
         # Calls normally run inside a transaction (DatabaseConnectionDep / committed()). Outside one
-        # (the SMS send-run lock) the value ends with this statement and does not reach the function.
+        # (the run lock of a cron) the value ends with this statement and does not reach the function.
         if session_user_id is not None:
             await self.connection.fetchval(
                 "select set_config('myapp.user_id', $1, true)",

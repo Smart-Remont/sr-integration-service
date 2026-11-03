@@ -126,7 +126,7 @@ class MyncaClient:
                     headers=self._headers(mode, has_body=payload is not None),
                     content=None if payload is None else _json_body(payload),
                 )
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, httpx.InvalidURL) as exc:
             logger.error(
                 "MyNCA transport error | path={path} error={error}",
                 path=_logged_path(path),

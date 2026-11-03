@@ -1,6 +1,6 @@
 """Scalar examples. The texts are the real PHP answers."""
 
-from .responses import DONE_TEXT, NO_BATCHES_TEXT, NO_MESSAGES_TEXT, SEND_RUN_BUSY_TEXT
+from .responses import DONE_TEXT, NO_BATCHES_TEXT, NO_MESSAGES_TEXT, RUN_BUSY_TEXT
 
 
 def _text_examples(**texts: str) -> dict[str, object]:
@@ -24,15 +24,18 @@ SMS_NOTIFY_RESPONSES: dict[int | str, dict[str, object]] = {
         "content": _text_examples(
             done=DONE_TEXT,
             empty=NO_MESSAGES_TEXT,
-            busy=SEND_RUN_BUSY_TEXT,
+            busy=RUN_BUSY_TEXT,
         ),
     },
     **_AUTH_RESPONSES,
 }
 SMS_NOTIFY_STATUS_RESPONSES: dict[int | str, dict[str, object]] = {
     200: {
-        "description": "`0` — статусы запрошены, в том числе при сбоях на отдельных пачках.",
-        "content": _text_examples(done=DONE_TEXT, empty=NO_BATCHES_TEXT),
+        "description": (
+            "`0` — статусы запрошены, в том числе при сбоях на отдельных пачках. Три сбоя транспорта "
+            "подряд заканчивают запуск, остальные пачки ждут следующего."
+        ),
+        "content": _text_examples(done=DONE_TEXT, empty=NO_BATCHES_TEXT, busy=RUN_BUSY_TEXT),
     },
     **_AUTH_RESPONSES,
 }

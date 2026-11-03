@@ -16,6 +16,7 @@ from asyncpg.exceptions import (
     UniqueViolationError,
 )
 from httpx import ASGITransport, AsyncClient
+from loguru import logger
 
 from src.database.deps import get_db_connection
 from src.features.kaspi.repo import account_lock_key
@@ -286,3 +287,21 @@ async def test_failed_commit_is_not_answered_as_paid(db: Database) -> None:
         app.dependency_overrides.clear()
     assert response.status_code == 500
     assert b"<prv_txn>" not in response.content
+
+
+async def test_failed_step_logs_the_state_and_not_the_text(
+    client: AsyncClient,
+    db: Database,
+) -> None:
+    db.responses[AFTER] = RaiseError("текст с ИИН 880101300123")
+    lines: list[str] = []
+    sink = logger.add(lines.append, format="{message}", level="DEBUG")
+    try:
+        response = await client.get(REQUEST_ROUTE, params=PAY, headers=PROXY_HEADERS)
+    finally:
+        logger.remove(sink)
+
+    assert response.status_code == 200
+    logged = "".join(lines)
+    assert "880101300123" not in logged
+    assert "Kaspi step after_payment_operations failed: P0001" in logged

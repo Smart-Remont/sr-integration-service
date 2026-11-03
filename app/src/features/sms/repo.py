@@ -8,6 +8,7 @@ from src.shared.advisory_lock import advisory_lock_key
 # PHP sets no module for these calls.
 _MODULE_CODE = ""
 _SEND_RUN_LOCK_KEY = advisory_lock_key("sms:sms-notify")
+_STATUS_RUN_LOCK_KEY = advisory_lock_key("sms:sms-notify-status")
 
 
 class SmsRepository(BaseRepository):
@@ -17,10 +18,16 @@ class SmsRepository(BaseRepository):
         return self.connection.transaction()
 
     async def try_lock_send_run(self) -> bool:
+        return await self._try_lock(_SEND_RUN_LOCK_KEY)
+
+    async def try_lock_status_run(self) -> bool:
+        return await self._try_lock(_STATUS_RUN_LOCK_KEY)
+
+    async def _try_lock(self, key: int) -> bool:
         """A session lock. It ends with the session or when the pool takes the connection back."""
         rows = await self.call_sp(
             "pg_catalog.pg_try_advisory_lock",
-            _SEND_RUN_LOCK_KEY,
+            key,
             module_code=_MODULE_CODE,
         )
         return scalar_from_sp_rows(rows) is True

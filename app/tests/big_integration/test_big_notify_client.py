@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from asyncpg.exceptions import RaiseError
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from src.database.deps import get_db_connection
 from src.main import app
@@ -143,3 +143,23 @@ async def test_notify_runs_on_custom_plans_as_in_a_new_php_session(
 
     assert response.status_code == 200
     assert "select set_config('plan_cache_mode', 'force_custom_plan', true)" in queries
+
+
+async def test_failed_commit_is_not_answered_as_done(db: FakeConnection) -> None:
+    db.responses = {"rest.big_notify_client": [{"big_notify_client": "ok"}]}
+
+    async def connection() -> AsyncIterator[FakeConnection]:
+        yield db
+        raise ConnectionError("commit failed")
+
+    app.dependency_overrides[get_db_connection] = connection
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as http:
+            response = await http.post(_url("big-notify-client"), content=b"{}", headers=_auth())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 500
+    assert b'"response": true' not in response.content
+    assert b'"response":true' not in response.content

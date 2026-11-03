@@ -10,8 +10,12 @@ changes nothing in the answer. The same here, with these consequences:
 - failures are logged by class only: the texts of database errors can quote the phone numbers and
   the message texts.
 
-One deliberate difference: PHP goes on after a failed record, and the service stops the run. When
-the database is down, PHP would send every remaining batch and then send them all again.
+Deliberate differences:
+
+- PHP goes on after a failed record, and the service stops the run. When the database is down, PHP
+  would send every remaining batch and then send them all again.
+- A status run has a lock, as a send run, and ends after a few transport failures in a row. PHP waits
+  for each batch as long as ``msg.kcell.kz`` is silent, and the next run of the cron starts on top.
 """
 
 import json
@@ -28,7 +32,7 @@ from src.php_compat.json_codec import (
 )
 from src.php_compat.text import php_string, zero_to_null
 from src.repository.base import SpRow
-from src.shared.cron_run import database_step_limit
+from src.shared.cron_run import database_step_limit, run_stop_requested
 
 from .client import KcellClient, KcellRequestError
 from .repo import SmsRepository
@@ -36,11 +40,13 @@ from .responses import (
     DONE_TEXT,
     NO_BATCHES_TEXT,
     NO_MESSAGES_TEXT,
-    SEND_RUN_BUSY_TEXT,
+    RUN_BUSY_TEXT,
     cron_text_response,
 )
 
 _MESSAGES_PER_BATCH = 200
+# The address of statuses is one host: a few silent batches in a row say the same about the rest.
+_STATUS_FAILURES_TO_END_RUN = 3
 
 
 class SmsService:
@@ -56,7 +62,7 @@ class SmsService:
                 locked = await self.repository.try_lock_send_run()
             if not locked:
                 logger.warning("SMS send run skipped: the previous run is not finished")
-                return cron_text_response(SEND_RUN_BUSY_TEXT)
+                return cron_text_response(RUN_BUSY_TEXT)
             async with database_step_limit(), self.repository.transaction():
                 messages = await self.repository.sms_notify__read()
         except Exception as exc:
@@ -66,21 +72,42 @@ class SmsService:
         if not messages:
             return cron_text_response(NO_MESSAGES_TEXT)
         for batch in batched(messages, _MESSAGES_PER_BATCH, strict=False):
+            if run_stop_requested():
+                logger.warning("SMS send run stopped between batches: the service is stopping")
+                break
             if not await self._send_batch(batch):
                 break
         return cron_text_response(DONE_TEXT)
 
     async def check_batch_statuses(self) -> Response:
         try:
-            async with self.repository.transaction():
+            async with database_step_limit():
+                locked = await self.repository.try_lock_status_run()
+            if not locked:
+                logger.warning("SMS status run skipped: the previous run is not finished")
+                return cron_text_response(RUN_BUSY_TEXT)
+            async with database_step_limit(), self.repository.transaction():
                 batches = await self.repository.sms_notify_batch__read()
         except Exception as exc:
             _log_failure("sms_notify_batch__read", exc)
             return cron_text_response(NO_BATCHES_TEXT)
         if not batches:
             return cron_text_response(NO_BATCHES_TEXT)
-        for batch in batches:
-            await self._update_batch_status(str(batch["batch_id"]))
+        failures_in_a_row = 0
+        for position, batch in enumerate(batches):
+            if run_stop_requested():
+                logger.warning("SMS status run stopped between batches: the service is stopping")
+                break
+            answered = await self._update_batch_status(str(batch["batch_id"]))
+            failures_in_a_row = 0 if answered else failures_in_a_row + 1
+            if failures_in_a_row >= _STATUS_FAILURES_TO_END_RUN:
+                logger.error(
+                    "SMS status run stopped: Kcell did not answer {failures} times in a row, "
+                    "{left} batches wait for the next run",
+                    failures=failures_in_a_row,
+                    left=len(batches) - position - 1,
+                )
+                break
         return cron_text_response(DONE_TEXT)
 
     async def _send_batch(self, messages: Sequence[SpRow]) -> bool:
@@ -135,7 +162,8 @@ class SmsService:
         logger.info("SMS batch {batch_id}: {count} messages", batch_id=batch_id, count=len(ids))
         return True
 
-    async def _update_batch_status(self, batch_id: str) -> None:
+    async def _update_batch_status(self, batch_id: str) -> bool:
+        """False when Kcell did not answer at all. Any answer, even an error page, is an answer."""
         try:
             answer = await self.kcell.read_batch_status(batch_id)
         except KcellRequestError as exc:
@@ -144,18 +172,20 @@ class SmsService:
                 batch_id=batch_id,
                 error=str(exc),
             )
-            return
+            return False
         messages = zero_to_null(_object_fields(answer).get("messages"))
         if messages is None:
-            return
+            return True
         try:
-            await self.repository.committed(
-                lambda repository: repository.sms_notify_status__set(
-                    php_json_encode_unescaped(messages),
-                ),
-            )
+            async with database_step_limit():
+                await self.repository.committed(
+                    lambda repository: repository.sms_notify_status__set(
+                        php_json_encode_unescaped(messages),
+                    ),
+                )
         except Exception as exc:
             _log_failure("sms_notify_status__set", exc)
+        return True
 
 
 def _log_failure(step: str, exc: Exception) -> None:

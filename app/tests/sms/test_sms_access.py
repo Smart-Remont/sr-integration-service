@@ -3,7 +3,7 @@
 import pytest
 from httpx import AsyncClient
 
-from src.config import kcell_config, sms_cron_auth_config
+from src.config import app_config, kcell_config, sms_cron_auth_config
 from tests.sms.fakes import CRON_USER, NOTIFY_ROUTE, STATUS_ROUTE, Database, Kcell, basic
 
 
@@ -90,6 +90,48 @@ async def test_each_route_needs_only_its_own_kcell_config(
     monkeypatch.setattr(kcell_config, other_field, "")
 
     response = await client.get(route)
+
+    assert response.status_code == 200
+    assert len(kcell.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("route", "field"),
+    [(NOTIFY_ROUTE, "send_url"), (STATUS_ROUTE, "status_url")],
+)
+async def test_kcell_password_does_not_go_without_tls_on_production(
+    client: AsyncClient,
+    db: Database,
+    kcell: Kcell,
+    monkeypatch: pytest.MonkeyPatch,
+    route: str,
+    field: str,
+) -> None:
+    monkeypatch.setattr(app_config, "env", "prod")
+    monkeypatch.setattr(kcell_config, field, "http://kcell.test/x")
+
+    response = await client.get(route)
+
+    assert response.status_code == 503
+    assert db.events == []
+    assert kcell.requests == []
+
+
+@pytest.mark.parametrize(
+    ("env", "url"),
+    [("prod", "https://kcell.test/x"), ("stage", "http://kcell.test/x")],
+)
+async def test_kcell_address_that_may_carry_the_password(
+    client: AsyncClient,
+    kcell: Kcell,
+    monkeypatch: pytest.MonkeyPatch,
+    env: str,
+    url: str,
+) -> None:
+    monkeypatch.setattr(app_config, "env", env)
+    monkeypatch.setattr(kcell_config, "status_url", url)
+
+    response = await client.get(STATUS_ROUTE)
 
     assert response.status_code == 200
     assert len(kcell.requests) == 1

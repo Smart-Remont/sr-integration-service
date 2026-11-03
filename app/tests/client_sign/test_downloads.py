@@ -3,6 +3,7 @@
 import io
 import re
 import zipfile
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -10,7 +11,7 @@ import pytest
 from asyncpg.exceptions import RaiseError
 from httpx import AsyncClient
 
-from src.config import ClientSignConfig
+from src.config import ClientSignConfig, app_config
 from src.features.client_sign import documents
 from tests.client_sign.fakes import CONFIG, FakeConnection, Partners, install_overrides
 
@@ -578,3 +579,19 @@ async def test_integration_failed_conversion_is_400(
 
     assert response.status_code == 400
     assert response.content == b""
+
+
+async def test_mynca_token_does_not_go_without_tls_on_production(
+    client: AsyncClient,
+    connection: FakeConnection,
+    partners: Partners,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_config, "env", "prod")
+    install_overrides(connection, partners, replace(CONFIG, mynca_base_url="http://mynca.test/api"))
+    connection.handlers[DS_FUNCTION] = [SIGNED_DS]
+
+    response = await client.get(f"{BASE}/download-cms/uuid/u-1/doc_type/DS")
+
+    assert response.status_code == 503
+    assert partners.requests == []

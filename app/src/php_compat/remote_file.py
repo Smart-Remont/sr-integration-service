@@ -29,7 +29,7 @@ async def file_get_contents(
                 )
                 return None
             return await _read_body(response, max_bytes)
-    except httpx.RequestError as exc:
+    except (httpx.RequestError, httpx.InvalidURL) as exc:
         logger.warning("Document fetch failed | error={error}", error=type(exc).__name__)
         return None
 

@@ -1,12 +1,15 @@
-"""What crons moved from PHP share: a time limit per database step and one held connection.
+"""What crons moved from PHP share: a time limit per database step, one held connection, the stop signal.
 
 A run keeps its connection, and with it the session advisory lock, from start to end. No transaction
 stays open on it while a partner answers: each database step commits on its own.
 """
 
 import asyncio
+import signal
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import FrameType
 
 from asyncpg import Connection, Pool
 from fastapi import HTTPException, status
@@ -17,6 +20,33 @@ DB_STEP_SECONDS = 60.0
 # unreachable server that rollback would wait for the cancel forever, and this margin ends the wait.
 ROLLBACK_MARGIN_SECONDS = 10.0
 _RELEASE_SECONDS = DB_STEP_SECONDS
+_stop_requested = False
+
+
+def install_run_stop_signal() -> None:
+    """Called from the lifespan: uvicorn has already set its SIGTERM handler, and it keeps working.
+
+    uvicorn says nothing to a running request: it waits for the request until gunicorn kills the worker
+    at ``graceful_timeout``, and the lifespan shuts down only after that. So the signal itself has to
+    reach a cron run, for the run to end on its own between rows instead of being killed in the middle
+    of one. A newer uvicorn that restores its handler would only lose this stop, as before it.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return
+    uvicorn_handler = signal.getsignal(signal.SIGTERM)
+
+    def handle_stop(number: int, frame: FrameType | None) -> None:
+        global _stop_requested
+        _stop_requested = True
+        if callable(uvicorn_handler):
+            uvicorn_handler(number, frame)
+
+    signal.signal(signal.SIGTERM, handle_stop)
+
+
+def run_stop_requested() -> bool:
+    """Checked between the rows of a run: the rest stays for the next run, of the next process."""
+    return _stop_requested
 
 
 @asynccontextmanager

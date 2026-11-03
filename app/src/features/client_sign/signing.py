@@ -71,6 +71,11 @@ class SigningService:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=f"{name} не настроен",
                 )
+        if not self._config.mynca_is_configured:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CLIENT_SIGN_MYNCA_BASE_URL не https",
+            )
 
     async def _document(self, doc_type: DocumentType, uuid: str) -> dict[str, Any] | None:
         async def read(repository: ClientSignRepository) -> dict[str, Any] | None:

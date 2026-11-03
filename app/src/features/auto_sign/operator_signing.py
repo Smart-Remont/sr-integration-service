@@ -37,7 +37,7 @@ from loguru import logger
 from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.text import php_string
 from src.repository.base import SpRow
-from src.shared.cron_run import database_step_limit
+from src.shared.cron_run import database_step_limit, run_stop_requested
 from src.shared.mynca_client import MyncaAnswer, MyncaClient
 from src.shared.uuid_text import is_uuid_text
 
@@ -108,6 +108,12 @@ class OperatorSigningService:
             AutoSignRepository.sign_read_for_auto_sign_operator,
         )
         for position, row in enumerate(rows, start=1):
+            if run_stop_requested():
+                logger.warning(
+                    "Auto sign: stopped between documents, the service is stopping | left={left}",
+                    left=len(rows) - position + 1,
+                )
+                break
             try:
                 await self._sign_row(row)
             except _RunMustEnd:

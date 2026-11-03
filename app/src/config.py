@@ -32,6 +32,11 @@ def _url_env(name: str) -> str:
     return os.getenv(name, "").strip().rstrip("/")
 
 
+def _may_carry_a_secret(url: str) -> bool:
+    """On production a token or a password goes over TLS only. A stand may use a local stub."""
+    return app_config.env != "prod" or url.startswith("https://")
+
+
 class BigIntegrationAuthConfig:
     username: str = os.getenv("INTEGRATION_HS_BI_USER", "hs_bi")
     password: str = os.getenv("INTEGRATION_HS_BI_PASSWORD", "")
@@ -107,13 +112,12 @@ class MailingConfig:
     office_public_dir: str = os.getenv("MAILING_OFFICE_PUBLIC_DIR", "").strip()
 
     @property
-    def smtp_is_configured(self) -> bool:
-        return bool(self.smtp_host and self.smtp_port and self.smtp_username and self.smtp_password)
-
-    @property
     def queue_is_configured(self) -> bool:
         return bool(
-            self.smtp_is_configured
+            self.smtp_host
+            and self.smtp_port
+            and self.smtp_username
+            and self.smtp_password
             and self.from_name
             and self.link_base_url
             and self.expeditor_cc_address
@@ -156,11 +160,21 @@ class KcellConfig:
 
     @property
     def send_is_configured(self) -> bool:
-        return bool(self.send_url and self.send_username and self.send_password)
+        return bool(
+            self.send_url
+            and self.send_username
+            and self.send_password
+            and _may_carry_a_secret(self.send_url)
+        )
 
     @property
     def status_is_configured(self) -> bool:
-        return bool(self.status_url and self.status_username and self.status_password)
+        return bool(
+            self.status_url
+            and self.status_username
+            and self.status_password
+            and _may_carry_a_secret(self.status_url)
+        )
 
 
 @dataclass(frozen=True)
@@ -178,6 +192,12 @@ class ClientSignConfig:
     partner_url: str = ""
     # Keys the back_url given to MyNCA. It is how a callback proves where it came from.
     callback_secret: str = ""
+
+    @property
+    def mynca_is_configured(self) -> bool:
+        return bool(
+            self.mynca_base_url and self.mynca_token and _may_carry_a_secret(self.mynca_base_url)
+        )
 
     @classmethod
     def from_env(cls) -> Self:

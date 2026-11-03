@@ -3,9 +3,11 @@
 The queue tables keep the text of a refusal and the answer of the cron prints it, so the failures have
 to be the same too. ``smtplib`` hides them: it strips the reply and has its own errors.
 
-One connection stays for the whole queue, also after a failure, as in PHP (``send_email`` replaces its
-own copy of the transport and the caller never sees it). When the server has gone, the rest of the
-queue therefore fails with the same kind of error. See PHP_DEFECTS.md.
+The session opens before the queue is touched (``open_session``), which PHP does not do: a wrong
+password or a closed address must not mark the whole queue as refused. After that one connection stays
+for the whole queue, also after a failure, as in PHP (``send_email`` replaces its own copy of the
+transport and the caller never sees it). When the server goes away in the middle, the rest of the queue
+therefore fails with the same kind of error. See PHP_DEFECTS.md.
 
 TLS is verified, as PHP does by default. No letter text or address goes to the log from here.
 """
@@ -53,26 +55,33 @@ class SmtpTimeoutError(SmtpError):
     """No reply in time. A late reply would then answer the next command, so the run has to stop."""
 
 
+class SmtpSessionError(SmtpError):
+    """Connecting, TLS or the login failed: nothing was sent, so no row of the queue may change."""
+
+
 class SmtpTransport:
     def __init__(self, settings: SmtpSettings) -> None:
         self._settings = settings
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._has_connection = False
+        self._first_letter_done = False
         self._tls_started = False
         self._in_session = False
         self._mail_given = False
         self._recipient_given = False
 
-    async def send(self, letter: ComposedLetter) -> None:
-        if self._has_connection:
-            await self._reset()
-        else:
-            # Zend keeps the connection object even when connecting fails: the next letter does
-            # not connect again and gets "No connection has been established".
-            self._has_connection = True
+    async def open_session(self) -> None:
+        try:
             await self._connect()
             await self._helo()
+        except SmtpError as exc:
+            raise SmtpSessionError(exc.message, exc.code) from exc
+
+    async def send(self, letter: ComposedLetter) -> None:
+        # As Zend: the letter that opens a session comes without RSET.
+        if self._first_letter_done:
+            await self._reset()
+        self._first_letter_done = True
         await self._mail(letter.return_path)
         for recipient in letter.recipients:
             await self._recipient(recipient)
@@ -163,8 +172,6 @@ class SmtpTransport:
         self._recipient_given = False
 
     async def _mail(self, sender: str) -> None:
-        if not self._in_session:
-            raise SmtpError("A valid session has not been started")
         await self._send(b"MAIL FROM:<" + sender.encode("utf-8", "surrogateescape") + b">")
         await self._expect((250,))
         self._mail_given = True

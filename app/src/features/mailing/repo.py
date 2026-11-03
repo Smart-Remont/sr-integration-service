@@ -1,4 +1,4 @@
-"""Functions of the crons. Each commits on its own, with a time limit, as PHP calls them."""
+"""Functions of the crons, one method each. The caller commits every step, as PHP calls them."""
 
 from asyncpg.transaction import Transaction
 

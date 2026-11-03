@@ -7,6 +7,7 @@ from src.php_compat.text import zero_to_null
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.advisory_lock import advisory_lock_key
+from src.shared.cron_run import database_step_limit
 
 from .doc_types import DocumentType
 from .errors import ClientSignDatabaseError
@@ -139,9 +140,16 @@ class ClientSignDatabase:
         self._pool = pool
 
     async def step[T](self, action: Callable[[ClientSignRepository], Awaitable[T]]) -> T:
-        """The commit comes before the caller answers, so a lost commit is never reported as done."""
+        """The commit comes before the caller answers, so a lost commit is never reported as done.
+
+        The limit covers all of it, also the wait of a repeated callback in ``lock_sign_process``.
+        """
         try:
-            async with self._pool.acquire() as connection, connection.transaction():
+            async with (
+                database_step_limit(),
+                self._pool.acquire() as connection,
+                connection.transaction(),
+            ):
                 return await action(ClientSignRepository(connection=connection))
         except (PostgresError, InterfaceError, OSError, TimeoutError) as exc:
             raise ClientSignDatabaseError.from_exception(exc) from exc

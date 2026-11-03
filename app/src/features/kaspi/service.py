@@ -17,6 +17,7 @@ from fastapi import Response
 from loguru import logger
 
 from src.php_compat.json_codec import php_json_encode_default
+from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.responses import php_html_response
 from src.repository.base import SpRow
 
@@ -126,7 +127,7 @@ class KaspiService:
             await self.repository.committed(lambda repo: repo.insert_kaspi_pay_log(entry))
         except Exception as exc:
             # PHP did not check the log call either: a lost log row must not change the answer.
-            logger.error("Kaspi log row lost: {error}", error=str(exc))
+            logger.error("Kaspi log row lost: {error}", error=php_error_state(exc))
         raise KaspiRefusalError(entry.response_xml)
 
     async def _log_success(self, entry: KaspiLogEntry) -> None:
@@ -144,7 +145,7 @@ class KaspiService:
             async with self.repository.savepoint():
                 return await call()
         except Exception as exc:
-            logger.error("Kaspi step {step} failed: {error}", step=step, error=str(exc))
+            logger.error("Kaspi step {step} failed: {error}", step=step, error=php_error_state(exc))
             return None
 
 

@@ -1,5 +1,6 @@
 """``client-sign/callback``. Never sent to the stand: it would record a signature."""
 
+import asyncio
 import json
 from collections.abc import Iterator
 
@@ -10,7 +11,9 @@ from loguru import logger
 
 from src.config import ClientSignConfig
 from src.features.client_sign.callback_key import callback_key
-from src.features.client_sign.repo import sign_process_lock_key
+from src.features.client_sign.errors import ClientSignDatabaseError
+from src.features.client_sign.repo import ClientSignDatabase, sign_process_lock_key
+from src.shared import cron_run
 from tests.client_sign.fakes import (
     CONFIG,
     FIND_SIGN,
@@ -18,6 +21,7 @@ from tests.client_sign.fakes import (
     LOCK,
     MODIFY_SIGN,
     FakeConnection,
+    FakePool,
     Partners,
     install_overrides,
 )
@@ -483,3 +487,20 @@ async def test_refused_body_leaves_its_reason_in_the_log(
     joined = "\n".join(captured_logs)
     assert "reason=invalid_json" in joined
     assert "reason=no_process_id" in joined
+
+
+async def test_callback_waiting_for_the_lock_ends_at_the_step_limit(
+    connection: FakeConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def hang(*_: object) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(connection, "fetch", hang)
+    monkeypatch.setattr(cron_run, "DB_STEP_SECONDS", 0.01)
+    database = ClientSignDatabase(FakePool(connection))
+
+    with pytest.raises(ClientSignDatabaseError):
+        await asyncio.wait_for(
+            database.step(lambda repository: repository.lock_sign_process("p")), 5
+        )

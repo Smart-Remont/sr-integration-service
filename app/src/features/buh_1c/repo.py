@@ -7,6 +7,7 @@ from src.php_compat.pdo_errors import php_error_state, php_pdo_message
 from src.php_compat.pdo_values import pdo_bound_text, pdo_text
 from src.php_compat.session_plans import plan_like_a_new_php_session
 from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.cron_run import database_step_limit
 
 from .errors import Buh1cFunctionError
 
@@ -61,11 +62,11 @@ class Buh1cDatabase:
     async def step[T](self, action: Callable[[Buh1cRepository], Awaitable[T]]) -> T:
         """A commit comes before the answer.
 
-        Without a database the error goes further and the caller gets 500: PHP redirects to
+        Without a database or an answer in time the error goes further and the caller gets 500: PHP redirects to
         ``/dict/permission`` there, which is no answer for 1C either. Errors of ``acquire`` are this
         case too, even those of the ``PostgresError`` family.
         """
-        async with self._pool.acquire() as connection:
+        async with database_step_limit(), self._pool.acquire() as connection:
             try:
                 async with connection.transaction():
                     await plan_like_a_new_php_session(connection)

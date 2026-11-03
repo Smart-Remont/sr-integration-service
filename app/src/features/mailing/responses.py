@@ -1,6 +1,6 @@
 """Answers of the crons as PHP ``RestController`` gave them."""
 
-from fastapi import Response
+from fastapi import Response, status
 
 from src.php_compat.responses import PHP_SESSION_HEADERS
 
@@ -10,9 +10,10 @@ ACTION_CONTENT_TYPE = "application/json; text/html; charset=utf-8"
 JSON_CONTENT_TYPE = "application/json"
 
 
-def cron_response(body: bytes = b"") -> Response:
+def cron_response(body: bytes = b"", *, status_code: int = status.HTTP_200_OK) -> Response:
     return Response(
         content=body,
+        status_code=status_code,
         headers={"Content-Type": ACTION_CONTENT_TYPE, **PHP_SESSION_HEADERS},
     )
 

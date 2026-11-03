@@ -1,5 +1,6 @@
 """``rest/buh`` moved from PHP: the paths of ``what`` that are alive. No real 1C, no real database."""
 
+import asyncio
 import json
 from collections.abc import Iterator
 
@@ -18,6 +19,7 @@ from src.exceptions.infra import UnexpectedDatabaseError
 from src.features.buh_1c.errors import ACTION_CONTENT_TYPE, Buh1cFunctionError
 from src.features.buh_1c.repo import Buh1cDatabase
 from src.features.buh_1c.service import Buh1cService
+from src.shared import cron_run
 from tests.buh_1c.conftest import (
     CHECK,
     JOURNAL,
@@ -418,3 +420,19 @@ def test_function_error_keeps_the_php_order_of_the_result() -> None:
     assert error.text == "Я/б"
     assert _pdo_debug(error.php_result_json()) == error.pdo_message
     assert "Я" not in error.php_result_json()
+
+
+async def test_hung_function_ends_at_the_step_limit_with_500(
+    client: AsyncClient,
+    db: Buh1cConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def hang(*_: object) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(db, "fetch", hang)
+    monkeypatch.setattr(cron_run, "DB_STEP_SECONDS", 0.01)
+
+    # No handler in the way of this client: on the service it is the 500 of an unhandled error.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(client.get(ROUTE, params={"what": "lot"}), 5)

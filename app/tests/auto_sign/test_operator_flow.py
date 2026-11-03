@@ -308,3 +308,21 @@ async def test_cron_answer_has_the_session_headers_of_php(client: AsyncClient) -
     assert response.content == b""
     assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate"
     assert response.headers["pragma"] == "no-cache"
+
+
+async def test_stop_signal_leaves_the_other_documents_for_the_next_run(
+    client: AsyncClient,
+    db: Database,
+    mynca: Mynca,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.responses[READ_ROWS] = [sign_row(), sign_row(sign_id=SIGN_ID + 1)]
+    stops = iter([False, True])
+    monkeypatch.setattr(
+        "src.features.auto_sign.operator_signing.run_stop_requested", lambda: next(stops)
+    )
+
+    response = await client.get(OPERATOR_ROUTE)
+
+    assert response.status_code == 200
+    assert len(mynca.sign_save_bodies()) == 1

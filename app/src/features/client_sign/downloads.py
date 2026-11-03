@@ -174,10 +174,10 @@ class DownloadService:
         return file_response(content, PDF_CONTENT_TYPE, _PARTNER_FILE_NAME, send_length=False)
 
     def _mynca_client(self) -> MyncaClient:
-        if not self._config.mynca_base_url or not self._config.mynca_token:
+        if not self._config.mynca_is_configured:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="CLIENT_SIGN_MYNCA_BASE_URL или CLIENT_SIGN_MYNCA_TOKEN не настроен",
+                detail="CLIENT_SIGN_MYNCA_BASE_URL не настроен или не https, либо нет токена",
             )
         return self._mynca
 

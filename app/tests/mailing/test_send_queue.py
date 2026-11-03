@@ -9,7 +9,7 @@ import pytest
 from asyncpg.exceptions import InterfaceError, RaiseError
 from httpx import AsyncClient
 
-from src.features.mailing.smtp import SmtpError, SmtpTimeoutError
+from src.features.mailing.smtp import SmtpError, SmtpSessionError, SmtpTimeoutError
 from src.features.mailing.steps import DatabaseGoneError
 from tests.mailing.fakes import (
     CC_ADDRESS,
@@ -53,7 +53,8 @@ async def test_empty_queue_answers_as_php_and_sends_nothing(
     assert response.headers["content-type"] == "application/json; text/html; charset=utf-8"
     assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate"
     assert mail.letters == []
-    assert mail.closed == 1
+    assert mail.sessions_opened == 0
+    assert mail.settings == []
 
 
 async def test_letter_has_the_links_and_the_headers_of_php(
@@ -216,6 +217,69 @@ async def test_lost_database_stops_the_run(
 
     assert response.status_code == 200
     assert mail.attempts == 0
+    assert mail.closed == 1
+
+
+@pytest.mark.parametrize(
+    ("message", "code"),
+    [
+        ("Connection refused", 0),
+        ("Unable to connect via TLS", 0),
+        ("5.7.8 bad login\r\n", 535),
+        ("smtp.test.invalid has timed out", 0),
+    ],
+)
+async def test_failed_session_ends_the_run_and_no_row_is_touched(
+    client: AsyncClient,
+    db: Database,
+    mail: MailServer,
+    log_lines: list[str],
+    message: str,
+    code: int,
+) -> None:
+    db.responses[READ_QUEUE] = [queue_row(11), queue_row(12)]
+    mail.refuse_session = SmtpSessionError(message, code)
+
+    response = await client.get(ROUTE)
+
+    assert response.status_code == 503
+    assert (
+        response.content == f"Mail session not opened, the queue is not touched: {message}".encode()
+    )
+    assert mail.attempts == 0
+    assert db.calls_of(MARK) == []
+    assert db.calls_of(FAILED) == []
+    assert db.calls_of(HARD) == []
+    assert db.calls_of(CHECK) == []
+    assert mail.closed == 1
+    logged = "".join(log_lines)
+    assert "mail session not opened, 2 rows stay queued" in logged
+    assert "one@test.invalid" not in logged
+
+
+async def test_session_opens_before_the_first_row_is_read(
+    client: AsyncClient, db: Database, mail: MailServer
+) -> None:
+    db.responses[READ_QUEUE] = [queue_row(11)]
+
+    await client.get(ROUTE)
+
+    assert db.events.index("session") < db.events.index(READ_ATTACHMENTS)
+    assert db.events.index(READ_QUEUE) < db.events.index("session")
+    assert mail.sessions_opened == 1
+
+
+async def test_stop_signal_leaves_the_rest_of_the_queue_for_the_next_run(
+    client: AsyncClient, db: Database, mail: MailServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.responses[READ_QUEUE] = [queue_row(11), queue_row(12)]
+    stops = iter([False, True])
+    monkeypatch.setattr("src.features.mailing.letter_queue.run_stop_requested", lambda: next(stops))
+
+    response = await client.get(ROUTE)
+
+    assert response.status_code == 200
+    assert db.calls_of(MARK) == [(11, 1)]
     assert mail.closed == 1
 
 

@@ -1,40 +1,48 @@
 """``send-email-new``: the queue of letters.
 
 Same as PHP: the order of calls, a connection for a run, the links, one letter per address, a failure
-recorded on the row and printed in the answer.
+recorded on the row and printed in the answer. Three deliberate differences:
 
-**The one deliberate difference, the record comes first.** PHP sends and then writes ``is_send = 1``,
-and does not look at the result of the write: the next run sends the letter again. Here the row is
-marked before the letter goes and committed, so whatever happens to the database after it, the letter
-does not go twice. A failed mark means no letter and the end of the run: the database is the problem,
-and the row stays in the queue. A refused letter then gets ``is_send = 2``, as in PHP.
+**The record comes first.** PHP sends and then writes ``is_send = 1``, and does not look at the result
+of the write: the next run sends the letter again. Here the row is marked before the letter goes and
+committed, so whatever happens to the database after it, the letter does not go twice. A failed mark
+means no letter and the end of the run: the database is the problem, and the row stays in the queue. A
+refused letter then gets ``is_send = 2``, as in PHP.
 
 What this costs: a process killed between the mark and the end of the sending leaves one row marked as
 sent while the letter did not go. The log shows such a row: ``marked`` without ``sent``. The order is
 chosen by the rule of the task: better a lost notification than a repeated one.
 
-**Another difference, a server without a reply in time ends the run.** PHP goes on, a late reply then
-answers the next command, and each next row gets ``is_send = 2`` with a text of another reply. So the
-rest of the queue is lost in PHP. Here the current row is recorded as refused, the others stay queued.
+**The session opens before the queue.** In PHP a failure of connecting, TLS or the login gets
+``is_send = 2`` on every row of the run, and nothing ever repeats those rows: a wrong password loses the
+letters, password resets among them. Here such a failure ends the run with 503 before any row is touched.
+So a session opens for a queue that turns out to have no letter to send, where PHP does not connect.
+
+**No reply in time after the session opened ends the run.** PHP goes on, a late reply then answers the
+next command, and each next row gets ``is_send = 2`` with a text of another reply. So the rest of the
+queue is lost in PHP. Here the current row is recorded as refused, the others stay queued. A connection
+lost in the middle goes as in PHP: the remaining rows of the run are recorded as refused.
 
 No addresses or texts go to the log.
 """
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import Response
+from fastapi import Response, status
 from loguru import logger
 
 from src.config import MailingConfig
 from src.php_compat.text import php_trim
 from src.repository.base import SpRow
+from src.shared.cron_run import run_stop_requested
 
 from .message import MailAttachment, MailCompositionError, compose_letter
 from .repo import MailingRepository
 from .responses import cron_response
-from .smtp import SmtpError, SmtpSettings, SmtpTimeoutError, SmtpTransport
+from .smtp import SmtpError, SmtpSessionError, SmtpSettings, SmtpTimeoutError, SmtpTransport
 from .steps import DatabaseGoneError, MailingSteps
 from .views import render_letter
 
@@ -47,10 +55,26 @@ _CLIENT = "CLIENT"
 # A refusal with this code means a dead mailbox: PHP takes it off the list for good.
 _UNSUBSCRIBE_CODE = 504
 QUEUE_LOCK = "send-email-new"
+_SESSION_NOT_OPENED = "Mail session not opened, the queue is not touched"
 
 
 class _RunStoppedError(Exception):
     """The mail server stopped answering: the rest of the queue waits for the next run."""
+
+
+@dataclass(frozen=True)
+class _QueueRun:
+    transport: SmtpTransport
+    output: bytearray
+
+
+@dataclass(frozen=True)
+class _LetterDraft:
+    row: SpRow
+    address: str
+    html: str
+    attachments: Sequence[SpRow]
+    unsubscribe_url: str
 
 
 class MailingQueueService:
@@ -67,29 +91,46 @@ class MailingQueueService:
     async def send_queue(self) -> Response:
         if not await self.steps.take_lock(QUEUE_LOCK):
             return cron_response()
-        output = bytearray()
         rows = await self.steps.value_or(
             "read_send_email", [], lambda repository: repository.read_send_email()
         )
-        transport = self.transport_factory(self._notify_settings())
+        if not rows:
+            return cron_response()
+        run = _QueueRun(self.transport_factory(self._smtp_settings()), bytearray())
         try:
+            await run.transport.open_session()
             for row in rows:
-                await self._send_row(row, transport, output)
+                if run_stop_requested():
+                    logger.warning("send-email-new stopped between rows: the service is stopping")
+                    break
+                await self._send_row(row, run)
+        except SmtpSessionError as exc:
+            logger.error(
+                "send-email-new stopped: mail session not opened, {count} rows stay queued, "
+                "code {code}: {error}",
+                count=len(rows),
+                code=exc.code,
+                error=exc.message,
+            )
+            return cron_response(
+                f"{_SESSION_NOT_OPENED}: {exc.message}".encode("utf-8", "replace"),
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         except DatabaseGoneError:
             logger.error("send-email-new stopped: the database is gone")
         except _RunStoppedError:
             logger.error("send-email-new stopped: the mail server does not answer")
         finally:
-            await transport.close()
-        return cron_response(bytes(output))
+            await run.transport.close()
+        return cron_response(bytes(run.output))
 
-    def _notify_settings(self) -> SmtpSettings:
+    def _smtp_settings(self) -> SmtpSettings:
         config = self.config
         return SmtpSettings(
             config.smtp_host, config.smtp_port, config.smtp_username, config.smtp_password
         )
 
-    async def _send_row(self, row: SpRow, transport: SmtpTransport, output: bytearray) -> None:
+    async def _send_row(self, row: SpRow, run: _QueueRun) -> None:
         send_email_id = row["send_email_id"]
         attachments = await self.steps.value_or(
             "read_send_email_attachment",
@@ -97,15 +138,14 @@ class MailingQueueService:
             lambda repository: repository.read_send_email_attachment(send_email_id),
         )
         for email in _text(row.get("email")).split(";"):
-            await self._send_to_address(row, email, attachments, transport, output)
+            await self._send_to_address(row, email, attachments, run)
 
     async def _send_to_address(
         self,
         row: SpRow,
         email: str,
         attachments: Sequence[SpRow],
-        transport: SmtpTransport,
-        output: bytearray,
+        run: _QueueRun,
     ) -> None:
         subscribed = await self.steps.value_or(
             "email_check_employee_subscribe",
@@ -129,8 +169,8 @@ class MailingQueueService:
             follow_url=follow_url,
             follow_text=follow_text,
         )
-        await self._deliver_notification(
-            row, email, html, attachments, transport, unsubscribe_url, output
+        await self._send_letter(
+            _LetterDraft(row, php_trim(email), html, attachments, unsubscribe_url), run
         )
 
     async def _follow_button(self, row: SpRow, info: SpRow | None) -> tuple[str, str]:
@@ -164,23 +204,15 @@ class MailingQueueService:
             _FOLLOW_REMONT_TEXT,
         )
 
-    async def _deliver_notification(
-        self,
-        row: SpRow,
-        email: str,
-        html: str,
-        attachments: Sequence[SpRow],
-        transport: SmtpTransport,
-        unsubscribe_url: str,
-        output: bytearray,
-    ) -> None:
+    async def _send_letter(self, draft: _LetterDraft, run: _QueueRun) -> None:
+        row = draft.row
         send_email_id = row["send_email_id"]
-        address = php_trim(email)
+        address = draft.address
         config = self.config
         carbon_copy = None
         if row.get("what") == _EXPEDITOR_CODE_ACCEPT:
             carbon_copy = (config.expeditor_cc_address, config.expeditor_cc_name)
-        files = [await self._read_attachment(item) for item in attachments]
+        files = [await self._read_attachment(item) for item in draft.attachments]
         try:
             letter = compose_letter(
                 from_address=config.smtp_username,
@@ -188,18 +220,18 @@ class MailingQueueService:
                 to=address,
                 carbon_copy=carbon_copy,
                 subject=_optional_text(row.get("email_title")),
-                html=html,
+                html=draft.html,
                 attachments=files,
-                extra_headers=[("Precedence", "list"), ("List-Unsubscribe", unsubscribe_url)],
+                extra_headers=[("Precedence", "list"), ("List-Unsubscribe", draft.unsubscribe_url)],
             )
         except MailCompositionError as exc:
-            await self._record_refusal(send_email_id, address, str(exc), 0, output)
+            await self._record_refusal(send_email_id, address, str(exc), 0, run.output)
             return
         await self._mark_sent(send_email_id)
         try:
-            await transport.send(letter)
+            await run.transport.send(letter)
         except SmtpError as exc:
-            await self._record_refusal(send_email_id, address, exc.message, exc.code, output)
+            await self._record_refusal(send_email_id, address, exc.message, exc.code, run.output)
             if isinstance(exc, SmtpTimeoutError):
                 raise _RunStoppedError from exc
             return

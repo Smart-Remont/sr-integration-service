@@ -14,7 +14,7 @@ from loguru import logger
 from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.text import php_int
 from src.repository.base import SpRow
-from src.shared.cron_run import database_step_limit
+from src.shared.cron_run import database_step_limit, run_stop_requested
 from src.shared.mynca_client import MyncaClient
 from src.storage.minio_client import put_object
 from src.storage.modes import logical_path_to_object_key, php_uniqid
@@ -43,6 +43,9 @@ class DocumentUploadService:
             AutoSignRepository.sign_read_for_doc,
         )
         for row in rows:
+            if run_stop_requested():
+                logger.warning("Auto upload: stopped between rows, the service is stopping")
+                break
             await self._upload_row(row)
         return empty_cron_response()
 

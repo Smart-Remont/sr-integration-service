@@ -27,7 +27,7 @@ class DocumentFetcher:
                 transport=self._transport,
             ) as client:
                 response = await client.get(url, headers={"Content-Type": "application/json"})
-        except httpx.RequestError as exc:
+        except (httpx.RequestError, httpx.InvalidURL) as exc:
             logger.warning("Signed file fetch failed | error={error}", error=type(exc).__name__)
             return b""
         logger.info("Signed file fetch | status={status}", status=response.status_code)

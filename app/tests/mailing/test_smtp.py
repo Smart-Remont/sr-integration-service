@@ -7,7 +7,13 @@ import ssl
 import pytest
 
 from src.features.mailing.message import ComposedLetter
-from src.features.mailing.smtp import SmtpError, SmtpSettings, SmtpTimeoutError, SmtpTransport
+from src.features.mailing.smtp import (
+    SmtpError,
+    SmtpSessionError,
+    SmtpSettings,
+    SmtpTimeoutError,
+    SmtpTransport,
+)
 from tests.mailing.fakes import StubWriter
 
 SETTINGS = SmtpSettings("smtp.test.invalid", 587, "user@test.invalid", "secret-pass")
@@ -54,11 +60,12 @@ class Connected:
         return bytes(self.writer.written).split(b"\r\n")
 
 
-async def test_first_letter_connects_starts_tls_logs_in_and_sends(
+async def test_session_connects_starts_tls_logs_in_and_the_first_letter_has_no_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connected = Connected(monkeypatch, [*HELLO, *LETTER_REPLIES])
 
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
 
     assert connected.tls == ["connect smtp.test.invalid:587", "start_tls"]
@@ -88,6 +95,7 @@ async def test_second_letter_stays_on_the_connection_with_reset(
 ) -> None:
     connected = Connected(monkeypatch, [*HELLO, *LETTER_REPLIES, b"250 reset\r\n", *LETTER_REPLIES])
 
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
     await connected.transport.send(LETTER)
 
@@ -108,6 +116,7 @@ async def test_refusal_says_what_php_stores(
     monkeypatch: pytest.MonkeyPatch, reply: bytes, message: str, code: int
 ) -> None:
     connected = Connected(monkeypatch, [*HELLO, b"250 s\r\n", reply])
+    await connected.transport.open_session()
 
     with pytest.raises(SmtpError) as failure:
         await connected.transport.send(LETTER)
@@ -123,6 +132,7 @@ async def test_refusal_without_text_counts_as_accepted_as_in_zend(
         monkeypatch, [*HELLO, *LETTER_REPLIES[:1], b"550\r\n", *LETTER_REPLIES[2:]]
     )
 
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
 
     assert connected.commands()[-2] == b"."
@@ -133,6 +143,7 @@ async def test_lost_connection_stays_lost_for_the_rest_of_the_run(
 ) -> None:
     connected = Connected(monkeypatch, [*HELLO, b"250 s\r\n"])
     connected.reader.feed_eof()
+    await connected.transport.open_session()
 
     with pytest.raises(SmtpError, match=r"Could not read from smtp\.test\.invalid"):
         await connected.transport.send(LETTER)
@@ -148,6 +159,7 @@ async def test_write_failure_over_tls_reads_as_php_and_before_tls_says_send(
             raise ConnectionResetError
 
     connected = Connected(monkeypatch, [*HELLO, *LETTER_REPLIES])
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
     connected.transport._writer = BrokenWriter()
     connected.reader.feed_eof()
@@ -160,19 +172,57 @@ async def test_write_failure_over_tls_reads_as_php_and_before_tls_says_send(
         await connected.transport.send(LETTER)
 
 
-async def test_failed_connect_is_not_tried_again_for_the_next_letter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_refused_connection_is_a_failed_session(monkeypatch: pytest.MonkeyPatch) -> None:
     async def refused(*_: object) -> None:
         raise ConnectionRefusedError(111, "Connection refused")
 
     monkeypatch.setattr(asyncio, "open_connection", refused)
-    transport = SmtpTransport(SETTINGS)
 
-    with pytest.raises(SmtpError, match="Connection refused"):
-        await transport.send(LETTER)
-    with pytest.raises(SmtpError, match="No connection has been established"):
-        await transport.send(LETTER)
+    with pytest.raises(SmtpSessionError, match="Connection refused"):
+        await SmtpTransport(SETTINGS).open_session()
+
+
+@pytest.mark.parametrize(
+    ("replies", "message", "code"),
+    [
+        ([b"554 go away\r\n"], "go away\r\n", 554),
+        ([*HELLO[:2], b"454 no tls\r\n"], "no tls\r\n", 454),
+        ([*HELLO[:6], b"535 bad\r\n"], "bad\r\n", 535),
+    ],
+    ids=["greeting", "starttls", "login"],
+)
+async def test_refusal_before_the_first_letter_is_a_failed_session(
+    monkeypatch: pytest.MonkeyPatch, replies: list[bytes], message: str, code: int
+) -> None:
+    connected = Connected(monkeypatch, replies)
+
+    with pytest.raises(SmtpSessionError) as failure:
+        await connected.transport.open_session()
+
+    assert failure.value.message == message
+    assert failure.value.code == code
+
+
+async def test_tls_failure_is_a_failed_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    connected = Connected(monkeypatch, HELLO[:3])
+
+    async def broken_tls(_: SmtpTransport) -> None:
+        raise SmtpError("Unable to connect via TLS")
+
+    monkeypatch.setattr(SmtpTransport, "_start_tls", broken_tls)
+
+    with pytest.raises(SmtpSessionError, match="Unable to connect via TLS"):
+        await connected.transport.open_session()
+
+
+async def test_silent_server_before_the_first_letter_is_a_failed_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connected = Connected(monkeypatch, [])
+    monkeypatch.setattr("src.features.mailing.smtp._COMMAND_SECONDS", 0.01)
+
+    with pytest.raises(SmtpSessionError, match=r"smtp\.test\.invalid has timed out"):
+        await connected.transport.open_session()
 
 
 async def test_ehlo_refused_falls_back_to_helo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,22 +239,10 @@ async def test_ehlo_refused_falls_back_to_helo(monkeypatch: pytest.MonkeyPatch) 
         ],
     )
 
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
 
     assert connected.commands()[:3] == [b"EHLO localhost", b"HELO localhost", b"STARTTLS"]
-
-
-async def test_login_refused_keeps_the_session_for_the_next_letter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connected = Connected(monkeypatch, [*HELLO[:6], b"535 bad\r\n", b"250 r\r\n", b"503 auth\r\n"])
-
-    with pytest.raises(SmtpError, match="bad"):
-        await connected.transport.send(LETTER)
-    with pytest.raises(SmtpError, match="auth") as second:
-        await connected.transport.send(LETTER)
-
-    assert second.value.code == 503
 
 
 class TlsWriter(StubWriter):
@@ -247,6 +285,7 @@ async def test_lines_sent_before_tls_do_not_pass_for_replies_after_it() -> None:
 
 async def test_no_reply_in_time_is_its_own_error(monkeypatch: pytest.MonkeyPatch) -> None:
     connected = Connected(monkeypatch, [*HELLO])
+    await connected.transport.open_session()
     monkeypatch.setattr("src.features.mailing.smtp._COMMAND_SECONDS", 0.01)
 
     with pytest.raises(SmtpTimeoutError, match=r"smtp\.test\.invalid has timed out"):
@@ -258,6 +297,7 @@ async def test_close_sends_quit_once_and_ignores_a_failure(
 ) -> None:
     connected = Connected(monkeypatch, [*HELLO, *LETTER_REPLIES, b"500 no\r\n"])
 
+    await connected.transport.open_session()
     await connected.transport.send(LETTER)
     await connected.transport.close()
 

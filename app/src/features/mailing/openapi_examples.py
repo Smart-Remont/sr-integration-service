@@ -22,7 +22,12 @@ SEND_QUEUE_RESPONSES: dict[int | str, dict[str, object]] = {
         "content": {"application/json; text/html; charset=utf-8": {}},
     },
     **_COMMON,
-    503: _NOT_CONFIGURED,
+    503: {
+        "description": (
+            "Нет настройки, либо не удалось подключиться к почтовому серверу, начать TLS или войти: "
+            "тело называет причину, строки очереди не тронуты, повторит следующий запуск"
+        ),
+    },
 }
 PAID_REQUESTS_RESPONSES: dict[int | str, dict[str, object]] = {
     200: {
