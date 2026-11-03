@@ -283,6 +283,18 @@ async def test_lines_sent_before_tls_do_not_pass_for_replies_after_it() -> None:
     assert writer.tls is None
 
 
+async def test_connection_reset_before_tls_is_a_failed_session() -> None:
+    writer = TlsWriter()
+    transport = _transport_before_tls(writer)
+    assert transport._reader is not None
+    transport._reader.set_exception(ConnectionResetError())
+
+    with pytest.raises(SmtpError, match="Unable to connect via TLS"):
+        await transport._start_tls()
+
+    assert writer.tls is None
+
+
 async def test_no_reply_in_time_is_its_own_error(monkeypatch: pytest.MonkeyPatch) -> None:
     connected = Connected(monkeypatch, [*HELLO])
     await connected.transport.open_session()

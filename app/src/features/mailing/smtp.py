@@ -131,9 +131,11 @@ class SmtpTransport:
             await self._expect((250,))
 
     async def _start_tls(self) -> None:
-        if self._writer is None or await self._has_unread_data():
+        if self._writer is None:
             raise SmtpError("Unable to connect via TLS")
         try:
+            if await self._has_unread_data():
+                raise SmtpError("Unable to connect via TLS")
             await asyncio.wait_for(
                 self._writer.start_tls(
                     ssl.create_default_context(),
