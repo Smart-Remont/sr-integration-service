@@ -51,6 +51,9 @@ class FileStoreMode(StrEnum):
     CLIENT_REQUEST_CHECK = "CLIENT_REQUEST_CHECK"
     RESIDENT_CHECK_DRAFT = "RESIDENT_CHECK_DRAFT"
     CLIENT_REQUEST_DRAFT = "CLIENT_REQUEST_DRAFT"
+    GUARANTEE_DOCS = "GUARANTEE_DOCS"
+    ANKETA_FILES = "ANKETA_FILES"
+    ANKETA_DOC_FILES = "ANKETA_DOC_FILES"
 
 
 FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
@@ -95,6 +98,9 @@ FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
     FileStoreMode.CLIENT_REQUEST_CHECK: "Черновая проверка заявки (фото/видео)",
     FileStoreMode.RESIDENT_CHECK_DRAFT: "Черновая приёмка ЖК",
     FileStoreMode.CLIENT_REQUEST_DRAFT: "Файлы черновой проверки заявки",
+    FileStoreMode.GUARANTEE_DOCS: "Гарантийные документы",
+    FileStoreMode.ANKETA_FILES: "Фото работ анкеты",
+    FileStoreMode.ANKETA_DOC_FILES: "Документы анкеты",
 }
 
 # Same folders/prefixes as KanbanController::srfileUploadAction.
@@ -141,6 +147,9 @@ MODE_PATH_TEMPLATES: dict[FileStoreMode, str] = {
     FileStoreMode.CLIENT_REQUEST_CHECK: "/documents/{date}/client_request_check/client_request_check_{n}_{uniq}.{ext}",
     FileStoreMode.RESIDENT_CHECK_DRAFT: "/documents/{date}/resident_check_draft/resident_check_draft_{n}_{uniq}.{ext}",
     FileStoreMode.CLIENT_REQUEST_DRAFT: "/documents/{date}/client_request_draft/client_request_draft_{n}_{uniq}.{ext}",
+    FileStoreMode.GUARANTEE_DOCS: "/documents/{date}/guarantee_docs/guarantee_file_{uniq}.{ext}",
+    FileStoreMode.ANKETA_FILES: "/documents/{date}/anketa_files/work_file_{uniq}.{ext}",
+    FileStoreMode.ANKETA_DOC_FILES: "/documents/{date}/anketa_doc_files/doc_file_{uniq}.{ext}",
 }
 
 
