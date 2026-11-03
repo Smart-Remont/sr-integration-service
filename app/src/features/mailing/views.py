@@ -5,8 +5,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-_PHP_WHITESPACE = " \t\n\r\0\x0b"
-
+from src.php_compat.text import php_trim
 
 _environment = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "templates"),
@@ -31,7 +30,7 @@ def render_letter(
         email_content=email_content,
         unsubscribe_url=unsubscribe_url,
         employee_fio=employee_fio,
-        has_follow_button=bool(follow_url.strip(_PHP_WHITESPACE)),
+        has_follow_button=bool(php_trim(follow_url)),
         follow_remont_btn=follow_url,
         follow_btn_text=follow_text,
         year=datetime.now(UTC).year,

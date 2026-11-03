@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from asyncpg import InterfaceError, Pool, PostgresError
 
-from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
+from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_bound_text, pdo_text, pg_row
 from src.php_compat.text import zero_to_null
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
@@ -12,8 +12,6 @@ from src.shared.cron_run import database_step_limit
 from .doc_types import DocumentType
 from .errors import ClientSignDatabaseError
 
-# PHP sets no module for these calls.
-_MODULE_CODE = ""
 _INT = "integer"
 _UUID = "uuid"
 _LOCK_KEY_PREFIX = "client-sign:"
@@ -56,7 +54,7 @@ class ClientSignRepository(BaseRepository):
             await self.call_sp(
                 "pg_catalog.pg_advisory_xact_lock",
                 sign_process_lock_key(sign_process_id),
-                module_code=_MODULE_CODE,
+                module_code=NO_MODULE_CODE,
             )
         except Exception as exc:
             raise ClientSignDatabaseError.from_exception(exc) from exc
@@ -126,7 +124,7 @@ class ClientSignRepository(BaseRepository):
                 function,
                 *bound_args,
                 cursor=cursor,
-                module_code=_MODULE_CODE,
+                module_code=NO_MODULE_CODE,
                 text_casts=casts,
             )
         except Exception as exc:

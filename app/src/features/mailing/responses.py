@@ -2,10 +2,8 @@
 
 from fastapi import Response, status
 
-from src.php_compat.responses import PHP_SESSION_HEADERS
+from src.php_compat.responses import PHP_REST_CONTENT_TYPE, PHP_SESSION_HEADERS
 
-# ``RestController::init`` sets it with header(), and the cron actions keep it.
-ACTION_CONTENT_TYPE = "application/json; text/html; charset=utf-8"
 # ``http_response_code`` of the controller replaces it.
 JSON_CONTENT_TYPE = "application/json"
 
@@ -14,7 +12,7 @@ def cron_response(body: bytes = b"", *, status_code: int = status.HTTP_200_OK) -
     return Response(
         content=body,
         status_code=status_code,
-        headers={"Content-Type": ACTION_CONTENT_TYPE, **PHP_SESSION_HEADERS},
+        headers={"Content-Type": PHP_REST_CONTENT_TYPE, **PHP_SESSION_HEADERS},
     )
 
 

@@ -2,7 +2,7 @@ from collections.abc import Sequence
 
 from asyncpg.transaction import Transaction
 
-from src.php_compat.pdo_values import pdo_bound_text, pdo_text, pg_row
+from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_bound_text, pdo_text, pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.advisory_lock import advisory_lock_key
@@ -10,8 +10,6 @@ from src.shared.advisory_lock import advisory_lock_key
 from .errors import KaspiDatabaseError
 from .params import KaspiLogEntry
 
-# PHP sets no module for these calls, and the functions compare the value with fixed names.
-_MODULE_CODE = ""
 _INT = "integer"
 _FLOAT = "double precision"
 # ``type`` of client.kaspi_check and client.insert_kaspi_pay_log: account is a client request.
@@ -30,7 +28,7 @@ class KaspiRepository(BaseRepository):
         await self.call_sp(
             "pg_catalog.pg_advisory_xact_lock",
             account_lock_key(account),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
 
     async def kaspi_check(
@@ -108,7 +106,7 @@ class KaspiRepository(BaseRepository):
                 function,
                 *bound_args,
                 cursor=cursor,
-                module_code=_MODULE_CODE,
+                module_code=NO_MODULE_CODE,
                 text_casts=casts,
             )
         except Exception as exc:

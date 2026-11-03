@@ -17,7 +17,7 @@ from src.php_compat.json_codec import (
     php_json_encode_pretty,
     php_json_encode_unescaped,
 )
-from src.php_compat.pdo_errors import is_php_unhandled_error, php_error_state
+from src.php_compat.pdo_errors import php_error_state, php_refusal_log_level
 
 from ..errors import BigIntegrationDatabaseError
 from ..php_contract import PhpResponseJsonError, php_bi_error_code, php_response_json_success
@@ -53,9 +53,11 @@ async def _create_lead(
     try:
         value = await create(_function_text(php_json_decode(raw_body)))
     except BigIntegrationDatabaseError as exc:
-        level = "ERROR" if is_php_unhandled_error(exc.message) else "INFO"
         logger.log(
-            level, "{route}: refused, state {state}", route=route, state=php_error_state(exc)
+            php_refusal_log_level(exc.message),
+            "{route}: refused, state {state}",
+            route=route,
+            state=php_error_state(exc),
         )
         raise PhpResponseJsonError(exc.message, data=php_bi_error_code(exc.message)) from exc
     return php_response_json_success(value)

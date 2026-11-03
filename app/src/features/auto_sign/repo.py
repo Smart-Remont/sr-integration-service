@@ -5,13 +5,11 @@ Rows with a company key do not go through ``pg_row``: it would turn the key byte
 
 from asyncpg.transaction import Transaction
 
-from src.php_compat.pdo_values import pdo_text, pg_row
+from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_text, pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.advisory_lock import advisory_lock_key
 
-# PHP sets no module for these calls.
-_MODULE_CODE = ""
 _INT = "integer"
 _UUID = "uuid"
 _BOOLEAN = "boolean"
@@ -26,7 +24,7 @@ class AutoSignRepository(BaseRepository):
         rows = await self.call_sp(
             "pg_catalog.pg_try_advisory_lock",
             advisory_lock_key(run_name),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
         return scalar_from_sp_rows(rows) is True
 
@@ -43,7 +41,7 @@ class AutoSignRepository(BaseRepository):
             pdo_text(company_id),
             master_key,
             cursor=True,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_INT, None),
         )
         return rows[0] if rows else None
@@ -71,7 +69,7 @@ class AutoSignRepository(BaseRepository):
             dn_name,
             "MYNCA_AUTO",
             pdo_text(sign_pid),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_INT, _INT, _INT, None, None, None, None, None, None, _INT),
         )
         return scalar_from_sp_rows(rows)
@@ -90,7 +88,7 @@ class AutoSignRepository(BaseRepository):
             sign_group_id,
             "CMS",
             None,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_INT, _UUID, _UUID, None, None),
         )
 
@@ -99,7 +97,7 @@ class AutoSignRepository(BaseRepository):
             "client.sign_tab__id_by_process",
             sign_process_id,
             cursor=True,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_UUID,),
         )
         return rows[0] if rows else None
@@ -108,11 +106,13 @@ class AutoSignRepository(BaseRepository):
         return self.connection.get_server_pid()
 
     async def terminate_session(self, pid: int) -> None:
-        await self.call_sp("pg_catalog.pg_terminate_backend", pid, module_code=_MODULE_CODE)
+        await self.call_sp("pg_catalog.pg_terminate_backend", pid, module_code=NO_MODULE_CODE)
 
     async def session_is_alive(self, pid: int) -> bool:
         """The call must start its own transaction: the server keeps this view for one transaction."""
-        rows = await self.call_sp("pg_catalog.pg_stat_get_activity", pid, module_code=_MODULE_CODE)
+        rows = await self.call_sp(
+            "pg_catalog.pg_stat_get_activity", pid, module_code=NO_MODULE_CODE
+        )
         return bool(rows)
 
     async def sign_read_for_doc(self) -> SpRows:
@@ -123,7 +123,7 @@ class AutoSignRepository(BaseRepository):
             "public.sign_group_id_get_by_client_request",
             pdo_text(client_request_id),
             cursor=True,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_INT,),
         )
         return pg_row(rows[0]) if rows else None
@@ -144,12 +144,12 @@ class AutoSignRepository(BaseRepository):
             sign_doc_url,
             _boolean_text(is_create_task),
             _boolean_text(is_update),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
             text_casts=(_INT, None, None, _BOOLEAN, _BOOLEAN),
         )
 
     async def _read_cursor(self, function: str) -> SpRows:
-        rows = await self.call_sp(function, cursor=True, module_code=_MODULE_CODE)
+        rows = await self.call_sp(function, cursor=True, module_code=NO_MODULE_CODE)
         return [pg_row(row) for row in rows]
 
 

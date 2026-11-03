@@ -1,11 +1,9 @@
 from asyncpg import InterfaceError, Pool
 
 from src.php_compat.pdo_errors import php_error_state
+from src.php_compat.pdo_values import NO_MODULE_CODE
 from src.repository import BaseRepository, scalar_from_sp_rows
 from src.shared.cron_run import database_step_limit
-
-# PHP sets no module for the calls of ``IntegrationController``.
-_MODULE_CODE = ""
 
 
 class ShowroomFunctionError(Exception):
@@ -14,7 +12,7 @@ class ShowroomFunctionError(Exception):
 
 class ShowroomRepository(BaseRepository):
     async def read_marketing_remont_list(self) -> str | None:
-        rows = await self.call_sp("rest.read_marketing_remont_list", module_code=_MODULE_CODE)
+        rows = await self.call_sp("rest.read_marketing_remont_list", module_code=NO_MODULE_CODE)
         value = scalar_from_sp_rows(rows)
         return None if value is None else str(value)
 

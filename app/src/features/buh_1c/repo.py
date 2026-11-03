@@ -4,15 +4,13 @@ from asyncpg import Pool, PostgresError
 
 from src.exceptions.infra import InfrastructureError
 from src.php_compat.pdo_errors import php_error_state, php_pdo_message
-from src.php_compat.pdo_values import pdo_bound_text, pdo_text
+from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_bound_text, pdo_text
 from src.php_compat.session_plans import plan_like_a_new_php_session
 from src.repository import BaseRepository, scalar_from_sp_rows
 from src.shared.cron_run import database_step_limit
 
 from .errors import Buh1cFunctionError
 
-# PHP sets no module for the calls of ``RestController``.
-_MODULE_CODE = ""
 _INVALID_ENCODING_STATE = "22021"
 # The database is gone, as opposed to a function that failed: connection errors, shutdown.
 _NO_DATABASE_STATE_CLASS = "08"
@@ -25,14 +23,14 @@ def _invalid_encoding_error(pdo_message: str) -> Buh1cFunctionError:
 
 class Buh1cRepository(BaseRepository):
     async def get_buh_url(self) -> None:
-        await self.call_sp("rest.get_buh_url", module_code=_MODULE_CODE)
+        await self.call_sp("rest.get_buh_url", module_code=NO_MODULE_CODE)
 
     async def insert_1c_json(self, json_body: str | None, what: str) -> None:
         await self.call_sp(
             "public.insert_1c_json",
             pdo_bound_text(json_body, _invalid_encoding_error),
             pdo_bound_text(what, _invalid_encoding_error),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
 
     async def buh_lot_read(self) -> str | None:
@@ -49,7 +47,7 @@ class Buh1cRepository(BaseRepository):
 
     async def _value(self, function: str, *json_text: str) -> str | None:
         arguments = [pdo_bound_text(text, _invalid_encoding_error) for text in json_text]
-        rows = await self.call_sp(function, *arguments, module_code=_MODULE_CODE)
+        rows = await self.call_sp(function, *arguments, module_code=NO_MODULE_CODE)
         return pdo_text(scalar_from_sp_rows(rows))
 
 

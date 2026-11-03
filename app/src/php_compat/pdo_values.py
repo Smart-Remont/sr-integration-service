@@ -12,6 +12,9 @@ from uuid import UUID
 
 from .pdo_errors import php_invalid_encoding_message
 
+# PHP sets no module for the calls of its integration controllers, and functions compare the value
+# with fixed names.
+NO_MODULE_CODE = ""
 # PostgreSQL prints timestamptz in the session time zone; prod uses Asia/Aqtau.
 _DB_TIME_ZONE = timezone(timedelta(hours=5))
 _FLOAT_PLAIN_LIMIT = 1e15

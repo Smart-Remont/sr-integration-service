@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Response
 from loguru import logger
 
-from src.php_compat.pdo_errors import is_php_unhandled_error
+from src.php_compat.pdo_errors import php_refusal_log_level
 
 from .errors import (
     Buh1cFunctionError,
@@ -84,5 +84,9 @@ class Buh1cService:
 
 def _log_refusal(step: str, exc: Buh1cFunctionError) -> None:
     # ``step`` is a name from this package, never the ``what`` of the request.
-    level = "ERROR" if is_php_unhandled_error(exc.text) else "INFO"
-    logger.log(level, "rest/buh: {step} refused, state {state}", step=step, state=exc.state)
+    logger.log(
+        php_refusal_log_level(exc.text),
+        "rest/buh: {step} refused, state {state}",
+        step=step,
+        state=exc.state,
+    )

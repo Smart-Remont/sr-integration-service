@@ -3,7 +3,6 @@
 _COMMON: dict[int | str, dict[str, object]] = {
     401: {"description": "Нет учётки Basic или она неверная"},
 }
-_NOT_CONFIGURED = {"description": "Нет настроек: база не вызывается, наружу запросов нет"}
 
 FILL_SEND_EMAIL_RESPONSES: dict[int | str, dict[str, object]] = {
     200: {

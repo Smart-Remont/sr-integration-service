@@ -8,6 +8,9 @@ PHP_SESSION_HEADERS = {
     "Pragma": "no-cache",
 }
 PHP_HTML_CONTENT_TYPE = "text/html; charset=UTF-8"
+PHP_WWW_AUTHENTICATE = 'Basic realm="Access denied"'
+# ``RestController::init`` sets it with header(), and the actions that do not replace it keep it.
+PHP_REST_CONTENT_TYPE = "application/json; text/html; charset=utf-8"
 
 
 def php_html_response(body: bytes = b"") -> Response:

@@ -4,7 +4,8 @@ import html.entities
 import math
 import re
 
-_TRIM_CHARS = " \t\n\r\0\x0b"
+PHP_TRIM_CHARS = " \t\n\r\0\x0b"
+PHP_TRIM_BYTES = PHP_TRIM_CHARS.encode()
 _ENTITY = re.compile(r"&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);")
 _NUMERIC_PREFIX = re.compile(r"[ \t\n\r\v\f]*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
 _TAG_NAME = re.compile(r"</?([^\s/>]*)")
@@ -53,7 +54,7 @@ def php_strip_tags(text: str, allowed: frozenset[str] = frozenset()) -> str:
 
 
 def php_trim(text: str) -> str:
-    return text.strip(_TRIM_CHARS)
+    return text.strip(PHP_TRIM_CHARS)
 
 
 def php_strtoupper(text: str) -> str:

@@ -8,7 +8,7 @@ from loguru import logger
 
 from src.php_compat.input_filter import php_filter_values
 from src.php_compat.json_codec import php_json_decode, php_json_encode_unescaped
-from src.php_compat.pdo_errors import is_php_unhandled_error, php_error_state, php_error_text
+from src.php_compat.pdo_errors import php_error_state, php_error_text, php_refusal_log_level
 from src.php_compat.text import php_is_truthy, php_string, php_trim
 
 from .errors import AlbatoMetaError, albato_meta_response
@@ -61,8 +61,11 @@ def _bad_request(message: str) -> AlbatoMetaError:
 
 def _database_refusal(exc: Exception) -> AlbatoMetaError:
     message = php_error_text(exc)
-    level = "ERROR" if is_php_unhandled_error(message) else "INFO"
-    logger.log(level, "albato-meta-lead: refused, state {state}", state=php_error_state(exc))
+    logger.log(
+        php_refusal_log_level(message),
+        "albato-meta-lead: refused, state {state}",
+        state=php_error_state(exc),
+    )
     return AlbatoMetaError(
         message if php_is_truthy(message) else _NOT_CREATED,
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

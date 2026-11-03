@@ -12,8 +12,8 @@ from loguru import logger
 
 from src.config import big_integration_auth_config
 from src.php_compat.json_codec import php_json_encode, php_json_encode_pretty
-from src.php_compat.pdo_errors import is_php_unhandled_error, php_error_state
-from src.php_compat.responses import PHP_HTML_CONTENT_TYPE
+from src.php_compat.pdo_errors import php_error_state, php_refusal_log_level
+from src.php_compat.responses import PHP_HTML_CONTENT_TYPE, PHP_WWW_AUTHENTICATE
 from src.security import verify_basic_credentials
 
 from .errors import BigIntegrationDatabaseError
@@ -110,10 +110,8 @@ def register_big_integration_handlers(app: FastAPI) -> None:
         return exc.to_response()
 
     async def database_error(request: Request, exc: BigIntegrationDatabaseError) -> Response:
-        # A function refusing on purpose is an ordinary answer, only a real failure is an error.
-        level = "ERROR" if is_php_unhandled_error(exc.message) else "INFO"
         logger.log(
-            level,
+            php_refusal_log_level(exc.message),
             "BIG route {path}: database error, state {state}",
             path=request.url.path,
             state=php_error_state(exc),
@@ -125,7 +123,7 @@ def register_big_integration_handlers(app: FastAPI) -> None:
         return Response(
             status_code=status.HTTP_401_UNAUTHORIZED,
             media_type=PHP_HTML_CONTENT_TYPE,
-            headers={**_CACHE_HEADERS, "WWW-Authenticate": 'Basic realm="Access denied"'},
+            headers={**_CACHE_HEADERS, "WWW-Authenticate": PHP_WWW_AUTHENTICATE},
         )
 
     app.add_exception_handler(BigIntegrationRequestError, request_error)

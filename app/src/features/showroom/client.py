@@ -3,11 +3,11 @@
 import httpx
 from loguru import logger
 
+from src.php_compat.remote_file import HTTPX_HEADERS_PHP_DOES_NOT_SEND
+
 # Longer than the usual 30 s on purpose. PHP had no limit at all, the run is once a day and holds
 # no connection to the database while it waits, and BI Group's real time to answer is unknown.
 _TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-# Added by httpx and absent from what PHP curl sends.
-_LIBRARY_HEADERS = ("User-Agent", "Accept-Encoding", "Connection")
 
 
 class ShowroomRequestError(Exception):
@@ -23,7 +23,7 @@ class ShowroomClient:
         """Any HTTP answer is returned as it is: PHP never looked at the status."""
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT, transport=self._transport) as client:
-                for name in _LIBRARY_HEADERS:
+                for name in HTTPX_HEADERS_PHP_DOES_NOT_SEND:
                     del client.headers[name]
                 response = await client.post(
                     self._url,

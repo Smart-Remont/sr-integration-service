@@ -5,14 +5,13 @@ from loguru import logger
 
 from src.php_compat.pdo_errors import php_clean_error, php_error_state
 from src.php_compat.pdo_values import pdo_bound_text
+from src.php_compat.text import PHP_TRIM_BYTES
 
 from ..errors import BigIntegrationDatabaseError
 from ..php_contract import PhpResponseJsonError, php_response_json_success
 
 if TYPE_CHECKING:
     from .repo import BigNotifyClientRepository
-
-_PHP_TRIM_BYTES = b" \t\n\r\0\x0b"
 
 
 class BigNotifyClientService:
@@ -32,7 +31,7 @@ class BigNotifyClientService:
 
 def _body_text(raw_body: bytes) -> str:
     """The text PDO bound: ``getRawBody`` gives ``false`` for a blank body, which PDO sends as ''."""
-    if not raw_body.strip(_PHP_TRIM_BYTES):
+    if not raw_body.strip(PHP_TRIM_BYTES):
         return ""
     text = pdo_bound_text(
         raw_body.decode("utf-8", "surrogateescape"),

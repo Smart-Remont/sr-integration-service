@@ -3,10 +3,7 @@
 import httpx
 from loguru import logger
 
-from src.php_compat.remote_file import file_get_contents
-
-# PHP curl waited without a limit, and a document is built while the caller waits.
-_DOCUMENT_TIMEOUT = httpx.Timeout(timeout=60.0, connect=10.0)
+from src.php_compat.remote_file import DOCUMENT_TIMEOUT, file_get_contents
 
 
 class DocumentFetcher:
@@ -22,7 +19,7 @@ class DocumentFetcher:
         """``getSignedFile``: any answer of the partner becomes the file, a failure an empty one."""
         try:
             async with httpx.AsyncClient(
-                timeout=_DOCUMENT_TIMEOUT,
+                timeout=DOCUMENT_TIMEOUT,
                 follow_redirects=False,
                 transport=self._transport,
             ) as client:

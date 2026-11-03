@@ -1,9 +1,7 @@
-from src.php_compat.pdo_values import pdo_text
+from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_text
 from src.repository import BaseRepository, scalar_from_sp_rows
 
 _SETTING_CODE = "ALBATO_META_TOKEN"
-# PHP sets no module for the calls of ``IntegrationController``.
-_MODULE_CODE = ""
 
 
 class AlbatoMetaRepository(BaseRepository):
@@ -11,7 +9,7 @@ class AlbatoMetaRepository(BaseRepository):
         rows = await self.call_sp(
             "public.get_setting_value_by_code",
             _SETTING_CODE,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
         return pdo_text(scalar_from_sp_rows(rows))
 
@@ -19,6 +17,6 @@ class AlbatoMetaRepository(BaseRepository):
         rows = await self.call_sp(
             "crm.request_from_albato_meta",
             payload,
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
         return scalar_from_sp_rows(rows)

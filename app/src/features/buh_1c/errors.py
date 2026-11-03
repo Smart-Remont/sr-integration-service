@@ -4,10 +4,9 @@ from fastapi import FastAPI, Request, Response, status
 
 from src.php_compat.json_codec import php_json_encode_default, php_json_encode_pretty
 from src.php_compat.pdo_errors import php_clean_error
+from src.php_compat.responses import PHP_REST_CONTENT_TYPE, PHP_WWW_AUTHENTICATE
 
-# ``RestController::init`` sets the first one with header(), ``response_json`` replaces it. So the
-# first one stays on every answer that does not go through ``response_json``.
-ACTION_CONTENT_TYPE = "application/json; text/html; charset=utf-8"
+# ``response_json`` replaces the type of the controller, the other answers keep it.
 RESPONSE_JSON_CONTENT_TYPE = "application/json"
 _HEADERS = {
     "Cache-Control": "no-cache, must-revalidate, max-age=0",
@@ -15,7 +14,6 @@ _HEADERS = {
     "Expires": "Thu, 19 Nov 1981 08:52:00 GMT",
     "Pragma": "no-cache",
 }
-_WWW_AUTHENTICATE = 'Basic realm="Access denied"'
 
 
 class Buh1cUnauthorizedError(Exception):
@@ -50,7 +48,7 @@ def action_response(content: bytes = b"", *, status_code: int = status.HTTP_200_
     return Response(
         content=content,
         status_code=status_code,
-        headers={"Content-Type": ACTION_CONTENT_TYPE, **_HEADERS},
+        headers={"Content-Type": PHP_REST_CONTENT_TYPE, **_HEADERS},
     )
 
 
@@ -84,7 +82,7 @@ def not_moved_response(what: str) -> Response:
 def register_buh_1c_handlers(app: FastAPI) -> None:
     async def unauthorized(_: Request, __: Buh1cUnauthorizedError) -> Response:
         response = action_response(status_code=status.HTTP_401_UNAUTHORIZED)
-        response.headers["WWW-Authenticate"] = _WWW_AUTHENTICATE
+        response.headers["WWW-Authenticate"] = PHP_WWW_AUTHENTICATE
         return response
 
     app.add_exception_handler(Buh1cUnauthorizedError, unauthorized)

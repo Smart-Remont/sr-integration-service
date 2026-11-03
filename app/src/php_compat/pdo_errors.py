@@ -61,6 +61,11 @@ def is_php_unhandled_error(clean_text: str) -> bool:
     return clean_text.startswith(_UNHANDLED_PREFIX)
 
 
+def php_refusal_log_level(clean_text: str) -> str:
+    """A function refusing on purpose is an ordinary answer, only a real failure is an error."""
+    return "ERROR" if is_php_unhandled_error(clean_text) else "INFO"
+
+
 def php_pdo_error_text(sqlstate: str, state_name: str, text: str) -> str:
     """The clean text of an error the database would give for a value checked before the call."""
     return f"{_UNHANDLED_PREFIX}{_pdo_message(sqlstate, state_name, text)}"

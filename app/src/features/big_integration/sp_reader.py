@@ -9,8 +9,6 @@ from src.repository.base import SpRow, SpRows
 from .errors import BigIntegrationDatabaseError
 
 DDU_MODULE_CODE = "DDU"
-# PHP sets no module for the calls of ``IntegrationController``.
-NO_MODULE_CODE = ""
 
 
 class BigIntegrationSpReader(BaseRepository):

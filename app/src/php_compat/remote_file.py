@@ -3,8 +3,11 @@
 import httpx
 from loguru import logger
 
-# default_socket_timeout of PHP.
-_TIMEOUT = httpx.Timeout(timeout=60.0, connect=10.0)
+# default_socket_timeout of PHP. Also for documents PHP curl waited for without a limit: they are
+# built while the caller waits.
+DOCUMENT_TIMEOUT = httpx.Timeout(timeout=60.0, connect=10.0)
+# Added by httpx and absent from what PHP curl sends.
+HTTPX_HEADERS_PHP_DOES_NOT_SEND = ("User-Agent", "Accept-Encoding", "Connection")
 _FIRST_HTTP_ERROR = 400
 
 
@@ -18,7 +21,7 @@ async def file_get_contents(
     try:
         async with (
             httpx.AsyncClient(
-                timeout=_TIMEOUT, follow_redirects=True, transport=transport
+                timeout=DOCUMENT_TIMEOUT, follow_redirects=True, transport=transport
             ) as client,
             client.stream("GET", url) as response,
         ):

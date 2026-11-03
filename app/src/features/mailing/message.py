@@ -14,12 +14,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from src.php_compat.text import PHP_TRIM_BYTES, PHP_TRIM_CHARS
+
 _LINE_END = b"\n"
 _LINE_LENGTH = 72
 _HEADER_LIMIT = 998
 _CHARSET = "utf8"
-_PHP_TRIM = b" \t\n\r\0\x0b"
-_PHP_TRIM_TEXT = " \t\n\r\0\x0b"
 _ADDRESS_RULE = str.maketrans({"\r": "", "\n": "", "\t": "", '"': "", ",": "", "<": "", ">": ""})
 _NAME_RULE = str.maketrans({"\r": "", "\n": "", "\t": "", '"': "'", "<": "[", ">": "]"})
 _OTHER_RULE = str.maketrans({"\r": "", "\n": "", "\t": ""})
@@ -84,12 +84,12 @@ def compose_letter(
         headers["Content-Type"] = f'multipart/mixed;\n boundary="{boundary}"'
         body = _multipart_body(boundary, html_text, attachments)
     else:
-        body = html_text.strip(_PHP_TRIM)
+        body = html_text.strip(PHP_TRIM_BYTES)
     headers["MIME-Version"] = "1.0"
     head = "".join(f"{name}: {value}\n" for name, value in headers.items()).encode(
         "utf-8", "surrogateescape"
     )
-    if any(len(line.strip(_PHP_TRIM)) > _HEADER_LIMIT for line in head.split(_LINE_END)):
+    if any(len(line.strip(PHP_TRIM_BYTES)) > _HEADER_LIMIT for line in head.split(_LINE_END)):
         raise MailCompositionError("At least one mail header line is too long")
     return ComposedLetter(
         return_path=sender,
@@ -116,7 +116,7 @@ def encode_quoted_printable(data: bytes) -> bytes:
 
 def _quoted_printable_text(data: bytes) -> bytes:
     text = data.replace(b"=", b"=3D")
-    return _NOT_PRINTABLE.sub(lambda m: b"=%02X" % m.group(0)[0], text).rstrip(_PHP_TRIM)
+    return _NOT_PRINTABLE.sub(lambda m: b"=%02X" % m.group(0)[0], text).rstrip(PHP_TRIM_BYTES)
 
 
 def _encode_header(value: str) -> str:
@@ -153,11 +153,11 @@ def _encode_quoted_printable_header(data: bytes) -> str:
         if position >= len(text):
             lines[-1] += pending
     joined = _LINE_END.join(b" " + prefix + line + b"?=" for line in lines)
-    return joined.strip(_PHP_TRIM).decode("ascii")
+    return joined.strip(PHP_TRIM_BYTES).decode("ascii")
 
 
 def _format_address(address: str, name: str) -> str:
-    cleaned = name.translate(_NAME_RULE).strip(_PHP_TRIM_TEXT)
+    cleaned = name.translate(_NAME_RULE).strip(PHP_TRIM_CHARS)
     if cleaned in ("", address):
         return address
     encoded = _encode_header(cleaned)
@@ -203,7 +203,7 @@ def _multipart_body(
     parts = [html_part, *(_attachment_part(item) for item in attachments)]
     content = _MULTIPART_PREAMBLE + b"".join(line + part for part in parts)
     content += _LINE_END + b"--" + boundary.encode() + b"--" + _LINE_END
-    return content.strip(_PHP_TRIM)
+    return content.strip(PHP_TRIM_BYTES)
 
 
 def _new_boundary() -> str:

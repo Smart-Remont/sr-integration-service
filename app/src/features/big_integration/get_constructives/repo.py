@@ -1,4 +1,6 @@
-from ..sp_reader import NO_MODULE_CODE, BigIntegrationSpReader
+from src.php_compat.pdo_values import NO_MODULE_CODE
+
+from ..sp_reader import BigIntegrationSpReader
 
 
 class GetConstructivesRepository(BigIntegrationSpReader):

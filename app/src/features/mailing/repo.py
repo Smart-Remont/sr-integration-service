@@ -2,13 +2,11 @@
 
 from asyncpg.transaction import Transaction
 
-from src.php_compat.pdo_values import pg_row
+from src.php_compat.pdo_values import NO_MODULE_CODE, pg_row
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.advisory_lock import advisory_lock_key
 
-# PHP sets no module for these calls.
-_MODULE_CODE = ""
 _LOCK_FUNCTION = "pg_catalog.pg_try_advisory_lock"
 _SET_CONFIG_FUNCTION = "pg_catalog.set_config"
 _NOTICE_SETTING = "myapp.notice"
@@ -27,16 +25,16 @@ class MailingRepository(BaseRepository):
         rows = await self.call_sp(
             _LOCK_FUNCTION,
             advisory_lock_key(f"mailing:{cron_name}"),
-            module_code=_MODULE_CODE,
+            module_code=NO_MODULE_CODE,
         )
         return scalar_from_sp_rows(rows) is True
 
     async def _read(self, function: str, *args: object) -> SpRows:
-        rows = await self.call_sp(function, *args, cursor=True, module_code=_MODULE_CODE)
+        rows = await self.call_sp(function, *args, cursor=True, module_code=NO_MODULE_CODE)
         return [pg_row(row) for row in rows]
 
     async def _scalar(self, function: str, *args: object) -> object | None:
-        rows = await self.call_sp(function, *args, module_code=_MODULE_CODE)
+        rows = await self.call_sp(function, *args, module_code=NO_MODULE_CODE)
         return scalar_from_sp_rows(rows)
 
     async def fill_send_email(self) -> None:
@@ -81,5 +79,5 @@ class MailingRepository(BaseRepository):
 
     async def clear_session_notice(self) -> None:
         await self.call_sp(
-            _SET_CONFIG_FUNCTION, _NOTICE_SETTING, "", False, module_code=_MODULE_CODE
+            _SET_CONFIG_FUNCTION, _NOTICE_SETTING, "", False, module_code=NO_MODULE_CODE
         )

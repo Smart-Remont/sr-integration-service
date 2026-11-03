@@ -6,9 +6,9 @@ import pytest
 from httpx import AsyncClient
 
 from src.config import buh_1c_auth_config
-from src.features.buh_1c.errors import ACTION_CONTENT_TYPE
 from src.features.buh_1c.whats import NOT_MOVED_WHAT, MovedWhat
 from src.main import app
+from src.php_compat.responses import PHP_REST_CONTENT_TYPE
 from tests.buh_1c.conftest import PASSWORD, ROUTE, USER, Buh1cConnection, FakePool
 
 
@@ -53,7 +53,7 @@ async def test_wrong_login_is_an_empty_401_before_any_call(
     assert response.status_code == 401
     assert response.content == b""
     assert response.headers["www-authenticate"] == 'Basic realm="Access denied"'
-    assert response.headers["content-type"] == ACTION_CONTENT_TYPE
+    assert response.headers["content-type"] == PHP_REST_CONTENT_TYPE
     assert response.headers["cache-control"] == "no-cache, must-revalidate, max-age=0"
     assert pool.acquired == 0
     assert db.calls == []

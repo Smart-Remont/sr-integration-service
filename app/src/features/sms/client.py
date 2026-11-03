@@ -8,14 +8,13 @@ import httpx
 from loguru import logger
 
 from src.config import KcellConfig
+from src.php_compat.remote_file import HTTPX_HEADERS_PHP_DOES_NOT_SEND
 
 # Far above the usual 30 s on purpose. An answer lost after Kcell accepted the batch leaves the
 # messages in the queue, and the next run sends them again. The send-run lock keeps overlapping runs
 # out, so a longer wait costs only delay. PHP had no limit at all.
 _SEND_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
 _STATUS_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
-# Added by httpx and absent from what PHP curl sends.
-_LIBRARY_HEADERS = ("User-Agent", "Accept-Encoding", "Connection")
 
 
 class KcellRequestError(Exception):
@@ -64,7 +63,7 @@ class KcellClient:
     ) -> bytes:
         try:
             async with httpx.AsyncClient(timeout=time_limits, transport=self._transport) as client:
-                for name in _LIBRARY_HEADERS:
+                for name in HTTPX_HEADERS_PHP_DOES_NOT_SEND:
                     del client.headers[name]
                 response = await client.request(
                     method,

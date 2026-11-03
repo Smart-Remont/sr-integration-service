@@ -16,9 +16,10 @@ from httpx import AsyncClient
 from loguru import logger
 
 from src.exceptions.infra import UnexpectedDatabaseError
-from src.features.buh_1c.errors import ACTION_CONTENT_TYPE, Buh1cFunctionError
+from src.features.buh_1c.errors import Buh1cFunctionError
 from src.features.buh_1c.repo import Buh1cDatabase
 from src.features.buh_1c.service import Buh1cService
+from src.php_compat.responses import PHP_REST_CONTENT_TYPE
 from src.shared import cron_run
 from tests.buh_1c.conftest import (
     CHECK,
@@ -193,7 +194,7 @@ async def test_what_php_has_no_branch_for_is_an_empty_200_after_the_check(
 
     assert response.status_code == 200
     assert response.content == b""
-    assert response.headers["content-type"] == ACTION_CONTENT_TYPE
+    assert response.headers["content-type"] == PHP_REST_CONTENT_TYPE
     assert response.headers["cache-control"] == CACHE_CONTROL
     assert db.functions() == [CHECK]
 
