@@ -2,6 +2,8 @@
 
 The templates come from the .phtml as they are: a line PHP ends with ``?>`` loses its newline,
 which is what ``trim_blocks`` does, and the indentation before a tag stays, so whitespace matches.
+The view on production has CRLF line ends, and the old page LF: the files here keep LF, and the list
+page gets its CRLF when it is loaded. ``getProjectName()`` of production is written into the titles.
 """
 
 import re
@@ -26,7 +28,13 @@ from src.php_compat.text import (
 from .doc_types import AGREEMENT_MANUAL, DocumentType
 
 _TEMPLATES = Path(__file__).parent / "templates"
-_HEAD = (_TEMPLATES / "sign_doc_list_head.html").read_bytes()
+_LINE_END = "\r\n"
+_HEAD = (
+    (_TEMPLATES / "sign_doc_list_head.html")
+    .read_bytes()
+    .replace(b"\r\n", b"\n")
+    .replace(b"\n", _LINE_END.encode())
+)
 OLD_SIGN_DOC_LIST_PAGE = (_TEMPLATES / "old_sign_doc_list.html").read_bytes()
 _NO_NAME = "—"
 _KEPT_DATE_TAGS = frozenset({"br"})
@@ -52,6 +60,7 @@ _environment = Environment(
     autoescape=False,  # noqa: S701
     trim_blocks=True,
     keep_trailing_newline=True,
+    newline_sequence=_LINE_END,
     finalize=_php_echo,
 )
 _environment.filters["h"] = php_html_escape

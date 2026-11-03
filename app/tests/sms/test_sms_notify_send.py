@@ -299,3 +299,80 @@ async def test_failed_release_is_logged_and_keeps_the_answer(
 
     assert_text(await client.get(NOTIFY_ROUTE), b"0")
     assert "release" in "".join(log_lines)
+
+
+# --- what the contour comparison found -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "bound"),
+    [
+        ("true", "1"),
+        ("false", ""),
+        ("[1]", "Array"),
+        ('{"a":1}', "Array"),
+        ("1.5", "1.5"),
+        ("123", "123"),
+        ("null", None),
+    ],
+)
+async def test_answer_values_are_bound_as_php_binds_them(
+    client: AsyncClient,
+    db: Database,
+    kcell: Kcell,
+    value: str,
+    bound: str | None,
+) -> None:
+    db.responses[READ_QUEUE] = [queue_row(1)]
+    kcell.answer = lambda _: httpx.Response(
+        200,
+        content=f'{{"batch_id":{value},"created_at":{value}}}'.encode(),
+    )
+
+    await client.get(NOTIFY_ROUTE)
+
+    args = db.calls_of(SET_RESULT)[0]
+    assert args[1:3] == (bound, bound)
+
+
+async def test_answer_that_is_a_json_string_records_its_first_byte_as_php_does(
+    client: AsyncClient,
+    db: Database,
+    kcell: Kcell,
+) -> None:
+    db.responses[READ_QUEUE] = [queue_row(1)]
+    kcell.answer = lambda _: httpx.Response(200, content=b'"abc"')
+
+    await client.get(NOTIFY_ROUTE)
+
+    assert db.calls_of(SET_RESULT)[0][1:3] == ("a", "a")
+    assert db.calls_of(SET_RESULT)[0][4] is None
+
+
+async def test_answer_string_with_a_multibyte_letter_records_nothing_and_run_goes_on(
+    client: AsyncClient,
+    db: Database,
+    kcell: Kcell,
+) -> None:
+    """The server refuses one byte of a letter, and that is no reason to stop the other batches."""
+    db.responses[READ_QUEUE] = [queue_row(number) for number in range(1, 202)]
+    answers = iter([b'"\xd0\xb0\xd0\xb1"', b'{"batch_id":"B2","created_at":"x"}'])
+    kcell.answer = lambda _: httpx.Response(200, content=next(answers))
+
+    response = await client.get(NOTIFY_ROUTE)
+
+    assert_text(response, b"0")
+    assert len(kcell.requests) == 2
+    assert [args[0] for args in db.calls_of(SET_RESULT)] == [[201]]
+
+
+async def test_cron_answer_has_the_session_headers_of_php(
+    client: AsyncClient,
+    db: Database,
+) -> None:
+    db.responses[READ_QUEUE] = []
+
+    response = await client.get(NOTIFY_ROUTE)
+
+    assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate"
+    assert response.headers["pragma"] == "no-cache"

@@ -53,13 +53,22 @@ RAW_STYLE = (
 )
 
 
+def _lines_as_lf(page: str) -> str:
+    """The text of the view is what these tests read. Line ends have their own test."""
+    return page.replace("\r\n", "\n")
+
+
 def render(*documents: dict, deleted: tuple[dict, ...] = (), info: dict | None = None) -> str:
-    return render_sign_doc_list(
-        request_hash="the-hash",
-        client_info=INFO if info is None else info,
-        documents=list(documents),
-        deleted_signatures=list(deleted),
-    ).decode()
+    return (
+        render_sign_doc_list(
+            request_hash="the-hash",
+            client_info=INFO if info is None else info,
+            documents=list(documents),
+            deleted_signatures=list(deleted),
+        )
+        .decode()
+        .replace("\r\n", "\n")
+    )
 
 
 def details(raw: str, indent: str = "                                ") -> str:
@@ -122,7 +131,7 @@ async def test_failed_hash_lookup_gives_the_error_page(
     connection.handlers = {HASH_LOOKUP: RaiseError("boom")}
     response = await client.get(f"{ROUTE}/remont/x")
     assert response.status_code == 200
-    body = response.text
+    body = _lines_as_lf(response.text)
     assert body.startswith("<!doctype html>")
     assert (
         '</head>\n<body>\n\n    <div class="cs-page-header">\n        <div class="cs-container">\n'
@@ -139,7 +148,7 @@ async def test_invalid_encoding_reaches_the_error_page_without_a_database_call(
     client: AsyncClient, connection: FakeConnection
 ) -> None:
     response = await client.get(f"{ROUTE}?remont=%ff")
-    assert "<p>Заявка не найдена</p>" in response.text
+    assert "<p>Заявка не найдена</p>" in _lines_as_lf(response.text)
     assert connection.called(HASH_LOOKUP) == []
 
 
@@ -154,8 +163,8 @@ async def test_failed_reads_leave_their_part_empty(
     }
     response = await client.get(f"{ROUTE}/remont/x")
     assert response.status_code == 200
-    assert "Нет документов для подписания" in response.text
-    assert "Нет отозванных подписей" in response.text
+    assert "Нет документов для подписания" in _lines_as_lf(response.text)
+    assert "Нет отозванных подписей" in _lines_as_lf(response.text)
     assert connection.called(DELETED) == [("7",)]
 
 
@@ -170,7 +179,8 @@ async def test_page_with_rows_from_the_database(
     }
     response = await client.get(f"{ROUTE}/remont/the-hash")
     assert (
-        'href="/client-sign/perform-sign/uuid/ds-uuid/doc_type/DS/hash/the-hash"' in response.text
+        'href="/client-sign/perform-sign/uuid/ds-uuid/doc_type/DS/hash/the-hash"'
+        in _lines_as_lf(response.text)
     )
 
 
@@ -349,3 +359,32 @@ async def test_old_address_is_one_fixed_page_without_the_database(
     assert first.content.startswith(b'<!doctype html>\n<html lang="ru" prefix="og: //ogp.me/ns#">')
     assert b"<b>Warning</b>" not in first.content
     assert connection.calls == []
+
+
+async def test_list_page_has_the_line_ends_and_title_of_production(
+    client: AsyncClient, connection: FakeConnection
+) -> None:
+    connection.handlers = {HASH_LOOKUP: None}
+    page = (await client.get(f"{ROUTE}/remont/x")).content
+    assert b"<title>SmartRemont \xe2\x80\x94 " in page
+    assert page.count(b"\n") == page.count(b"\r\n") > 100
+
+
+async def test_old_list_page_has_the_title_of_production_and_keeps_lf(client: AsyncClient) -> None:
+    page = (await client.get(OLD_ROUTE)).content
+    assert b"<title>SmartRemont</title>" in page
+    assert b"\r\n" not in page
+
+
+def test_values_keep_their_own_line_ends_and_the_page_text_is_crlf() -> None:
+    value = "ЖК\nа\r\nб"
+    page = render_sign_doc_list(
+        request_hash="the-hash",
+        client_info={**INFO, "resident_name": value},
+        documents=[],
+        deleted_signatures=[],
+    )
+    assert value.encode() in page
+    text = page.replace(value.encode(), b"")
+    assert text.count(b"\n") == text.count(b"\r\n") > 100
+    assert b"\r\r\n" not in text

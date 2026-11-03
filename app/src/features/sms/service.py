@@ -26,8 +26,7 @@ from src.php_compat.json_codec import (
     php_json_encode_pretty,
     php_json_encode_unescaped,
 )
-from src.php_compat.pdo_values import pdo_text
-from src.php_compat.text import zero_to_null
+from src.php_compat.text import php_string, zero_to_null
 from src.repository.base import SpRow
 from src.shared.cron_run import database_step_limit
 
@@ -104,15 +103,22 @@ class SmsService:
             # next batches are still tried. This is not a database failure, so the run goes on.
             logger.error("Kcell reply is not JSON, {count} messages stay queued", count=len(ids))
             return True
-        fields = _object_fields(answer)
-        batch_id = pdo_text(fields.get("batch_id"))
+        fields = _send_answer_fields(answer)
+        batch_id = _bound_text(fields.get("batch_id"))
         results = zero_to_null(fields.get("results"))
+        if not _is_valid_utf8(batch_id):
+            # A JSON string with a multibyte first letter: the server refuses the single byte PDO
+            # sends, nothing is recorded, and this is not a database failure: the run goes on.
+            logger.error(
+                "Kcell reply gives no usable batch, {count} messages stay queued", count=len(ids)
+            )
+            return True
         try:
             async with database_step_limit(), self.repository.transaction():
                 await self.repository.sms_notify_result__set(
                     ids=ids,
                     batch_id=batch_id,
-                    created_at=pdo_text(fields.get("created_at")),
+                    created_at=_bound_text(fields.get("created_at")),
                     response=answer.decode("utf-8", "surrogateescape"),
                     results=None if results is None else php_json_encode_unescaped(results),
                 )
@@ -154,6 +160,30 @@ class SmsService:
 
 def _log_failure(step: str, exc: Exception) -> None:
     logger.error("SMS step {step} failed: {error}", step=step, error=type(exc).__name__)
+
+
+def _bound_text(value: object) -> str | None:
+    """What PDO binds for a value of the answer: ``true`` is ``1`` and an array is ``Array``."""
+    return None if value is None else php_string(value)
+
+
+def _send_answer_fields(answer: bytes) -> SpRow:
+    """``$result['batch_id']`` on a JSON string is its first byte.
+
+    Kcell has not answered this way. An ASCII first letter records the rows as sent, as in PHP: without
+    it such an answer would send the SMS again every minute.
+    """
+    decoded = php_json_decode(answer)
+    if isinstance(decoded, str):
+        first_byte = decoded.encode("utf-8", "surrogateescape")[:1].decode(
+            "utf-8", "surrogateescape"
+        )
+        return {"batch_id": first_byte, "created_at": first_byte}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _is_valid_utf8(text: str | None) -> bool:
+    return text is None or not any("\udc80" <= letter <= "\udcff" for letter in text)
 
 
 def _object_fields(answer: bytes) -> SpRow:

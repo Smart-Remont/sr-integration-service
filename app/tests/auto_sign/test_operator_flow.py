@@ -299,3 +299,12 @@ async def test_sign_save_leaves_a_trace_before_and_after(
     assert f"cms/sign-save starts | sign_id={SIGN_ID} ext_id=501" in lines
     assert f"cms/sign-save answered | sign_id={SIGN_ID} process={NEW_PROCESS}" in lines
     assert lines.index("cms/sign-save starts") < lines.index("cms/sign-save answered")
+
+
+async def test_cron_answer_has_the_session_headers_of_php(client: AsyncClient) -> None:
+    """Found by the contour comparison: PHP opens a session, and its headers come with the answer."""
+    response = await client.get(OPERATOR_ROUTE)
+
+    assert response.content == b""
+    assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate"
+    assert response.headers["pragma"] == "no-cache"
