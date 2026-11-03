@@ -9,8 +9,10 @@ from .room_mapping import (
     ReadRoom,
     RoomType,
     full_balcony_area,
+    is_kitchen_studio,
     is_terrace,
     merge_open_storage,
+    note_kitchen_without_living_room,
     room_type,
     system_rooms,
 )
@@ -124,9 +126,9 @@ def _neighbors(
     return KlRoomNeighbors(**sides)
 
 
-def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRoom]]:
-    """Rooms of the flat mapped to system rooms, and terraces kept apart (they count in the
-    sheet total but are not rooms)."""
+def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRoom], bool]:
+    """Rooms of the flat mapped to system rooms, terraces kept apart (they count in the
+    sheet total but are not rooms), and whether the kitchen is open to the living room."""
     read = []
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
         area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
@@ -170,20 +172,26 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
                 room.area = full
     terraces = [room for room in read if is_terrace(room.name)]
     read = merge_open_storage([room for room in read if not is_terrace(room.name)], doubts)
+    note_kitchen_without_living_room(read, doubts)
+    studio = is_kitchen_studio(read)
     targets = system_rooms([room.kind for room in read], [room.area for room in read])
-    return [
-        KlRoom(
-            name=room.name,
-            area=room.area,
-            financial_area=room.financial_area,
-            room_type=room.kind,
-            room_id=target.room_id if target else None,
-            system_name=target.name if target else None,
-            merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
-            neighbors=_neighbors(room, printed_areas, read, targets, terraces),
-        )
-        for room, target in zip(read, targets, strict=True)
-    ], terraces
+    return (
+        [
+            KlRoom(
+                name=room.name,
+                area=room.area,
+                financial_area=room.financial_area,
+                room_type=room.kind,
+                room_id=target.room_id if target else None,
+                system_name=target.name if target else None,
+                merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
+                neighbors=_neighbors(room, printed_areas, read, targets, terraces),
+            )
+            for room, target in zip(read, targets, strict=True)
+        ],
+        terraces,
+        studio,
+    )
 
 
 def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
@@ -215,7 +223,7 @@ def build_result(
             meta=meta,
         )
 
-    rooms, terraces = _rooms(answer.get("rooms"), doubts)
+    rooms, terraces, studio = _rooms(answer.get("rooms"), doubts)
 
     rooms_sum = round(
         sum(room.financial_area for room in rooms) + sum(t.financial_area for t in terraces), 2
@@ -251,6 +259,7 @@ def build_result(
         # Unrecognised sheets carry no rooms: the planirovka is entered by hand, and half-read
         # rooms must not be mistaken for a result. Sums and doubts still explain what failed.
         rooms=rooms if status is RecognitionStatus.RECOGNIZED else [],
+        is_kitchen_studio=studio if status is RecognitionStatus.RECOGNIZED else False,
         terraces=[KlRoomPart(name=t.name, area=t.area) for t in terraces]
         if status is RecognitionStatus.RECOGNIZED
         else [],

@@ -108,6 +108,13 @@ class KlRecognitionResult(BaseSchema):
         )
     )
     reason: str = Field(description="Почему такой статус.")
+    is_kitchen_studio: bool = Field(
+        default=False,
+        description=(
+            "Кухня без стены к гостиной: кухня-ниша или граница пунктиром. Площади кухни и "
+            "гостиной остаются раздельными, признак — для `planirovka_tab.is_kitchen_studio`."
+        ),
+    )
     rooms: list[KlRoom]
     terraces: list[KlRoomPart] = Field(
         default_factory=list,

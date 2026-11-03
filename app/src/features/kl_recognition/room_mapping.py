@@ -143,6 +143,39 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
     return [room for i, room in enumerate(rooms) if i not in absorbed]
 
 
+# A kitchen with one of these words in its label is open to the living room by definition.
+OPEN_KITCHEN_WORDS = ("ниш", "студи")
+
+
+def is_kitchen_studio(rooms: list[ReadRoom]) -> bool:
+    """A kitchen with no wall to the living room: areas stay apart, only the flag is set
+    (planirovki since 2025: «Кухня-ниша» next to «Гостиная», never summed). Needs a living room:
+    `check_rooms` in myspace lets a plan without one through only with this flag."""
+    living = [room for room in rooms if room.kind is RoomType.LIVING_ROOM]
+    if not living:
+        return False
+    for room in rooms:
+        if room.kind is not RoomType.KITCHEN:
+            continue
+        if any(word in room.name.casefold() for word in OPEN_KITCHEN_WORDS):
+            return True
+        if room.open_to and any(abs(other.area - room.open_to[1]) < 0.005 for other in living):
+            return True
+    return False
+
+
+def note_kitchen_without_living_room(rooms: list[ReadRoom], doubts: list[str]) -> None:
+    """One large «Кухня» with no «Гостиная»: operators split its area by hand."""
+    if any(room.kind is RoomType.LIVING_ROOM for room in rooms):
+        return
+    for room in rooms:
+        if room.kind is RoomType.KITCHEN:
+            doubts.append(
+                f"«{room.name}» {room.area}: гостиной на листе нет, кухня и гостиная, видимо, "
+                "одно помещение — разделите площадь вручную"
+            )
+
+
 # Latin letters that look like Cyrillic ones: models sometimes mix them into Russian words.
 _LOOKALIKES = str.maketrans("aceopxykmthbACEOPXYKMTHB", "асеорхукмтнвАСЕОРХУКМТНВ")
 _BY_NAME = {kind.value.casefold(): kind for kind in RoomType}

@@ -520,3 +520,61 @@ async def test_plan_images_are_built_two_at_a_time(composer: AsyncMock) -> None:
 
     assert all(result.status == "recognized" for result in results)
     assert peak == 2
+
+
+def kitchen_rooms(kitchen: dict[str, Any], *others: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"type": "Кухня", "financialArea": kitchen["area"], **kitchen}, *others]
+
+
+LIVING = {"name": "Гостиная", "type": "Гостиная", "area": 15.26, "financialArea": 15.26}
+
+
+async def recognize_rooms(
+    client: AsyncClient, composer: AsyncMock, rooms: list[dict[str, Any]]
+) -> dict[str, Any]:
+    total = round(sum(room["financialArea"] for room in rooms), 2)
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": total})
+    return await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+
+
+async def test_kitchen_niche_is_a_studio_with_areas_kept_apart(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    niche = {"name": "Кухня-ниша", "area": 7.93}
+    result = await recognize_rooms(client, composer, kitchen_rooms(niche, LIVING))
+    assert result["is_kitchen_studio"] is True
+    assert [room["area"] for room in result["rooms"]] == [7.93, 15.26]
+
+
+async def test_plain_kitchen_is_a_studio_only_when_open_to_the_living_room(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    open_to = {"name": "Гостиная", "area": 15.26}
+    kitchen = {"name": "Кухня", "area": 6.29}
+    opened = kitchen_rooms({**kitchen, "openTo": open_to}, LIVING)
+    assert (await recognize_rooms(client, composer, opened))["is_kitchen_studio"] is True
+    walled = kitchen_rooms({**kitchen, "openTo": None}, LIVING)
+    assert (await recognize_rooms(client, composer, walled))["is_kitchen_studio"] is False
+
+
+async def test_wardrobe_niche_does_not_make_a_studio(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    niche = {
+        "name": "Ниша для шкафов",
+        "type": "Гардеробная",
+        "area": 1.73,
+        "financialArea": 1.73,
+    }
+    rooms = kitchen_rooms({"name": "Кухня", "area": 10.65}, LIVING, niche)
+    assert (await recognize_rooms(client, composer, rooms))["is_kitchen_studio"] is False
+
+
+@pytest.mark.parametrize("name", ["Кухня", "Кухня-ниша"])
+async def test_kitchen_without_living_room_is_noted_and_not_a_studio(
+    client: AsyncClient, composer: AsyncMock, name: str
+) -> None:
+    # The flag would let such a plan through the check in myspace, so it must stay off.
+    result = await recognize_rooms(client, composer, kitchen_rooms({"name": name, "area": 18.7}))
+    assert result["is_kitchen_studio"] is False
+    assert any("гостиной на листе нет" in doubt for doubt in result["doubts"])
