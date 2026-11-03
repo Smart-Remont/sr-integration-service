@@ -1,12 +1,9 @@
-from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from asyncpg import Connection, Pool
 from fastapi import Depends
 
 from src.config import auto_sign_config
-from src.database.pool import get_db_pool
-from src.shared.cron_run import held_run_connection
+from src.shared.cron_run import run_connection_dep
 from src.shared.mynca_client import MyncaClient
 
 from .document_upload import DocumentUploadService
@@ -14,19 +11,10 @@ from .failure_brake import SigningFailureBrake, signing_failure_brake
 from .operator_signing import OperatorSigningService
 from .repo import AutoSignRepository
 
-
-async def get_auto_sign_connection(
-    db_pool: Annotated[Pool, Depends(get_db_pool)],
-) -> AsyncGenerator[Connection]:
-    """No transaction stays open: each step commits on its own while MyNCA or a partner answers."""
-    async with held_run_connection(db_pool, cron_name="Auto sign") as connection:
-        yield connection
+_Connection = run_connection_dep("Auto sign")
 
 
-def get_auto_sign_repository(
-    # function scope: the connection, and with it the lock, goes back before the response is sent.
-    connection: Annotated[Connection, Depends(get_auto_sign_connection, scope="function")],
-) -> AutoSignRepository:
+def get_auto_sign_repository(connection: _Connection) -> AutoSignRepository:
     return AutoSignRepository(connection=connection)
 
 

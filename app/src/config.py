@@ -48,18 +48,15 @@ class KaspiProxyConfig:
     secret: str = os.getenv("KASPI_PROXY_SECRET", "")
 
 
-class SmsCronAuthConfig:
-    """Basic auth of the crontab wget lines for /api/sms/*. Empty: 503."""
+class CronAuthConfig:
+    """Basic auth of the crontab wget lines of one group of crons: <prefix>_USER, <prefix>_PASSWORD.
 
-    username: str = os.getenv("SMS_CRON_USER", "")
-    password: str = os.getenv("SMS_CRON_PASSWORD", "")
+    Empty: 503.
+    """
 
-
-class AutoSignCronAuthConfig:
-    """Basic auth of the crontab wget lines for /api/auto_sign/*. Empty: 503."""
-
-    username: str = os.getenv("AUTO_SIGN_CRON_USER", "")
-    password: str = os.getenv("AUTO_SIGN_CRON_PASSWORD", "")
+    def __init__(self, env_prefix: str) -> None:
+        self.username = os.getenv(f"{env_prefix}_USER", "")
+        self.password = os.getenv(f"{env_prefix}_PASSWORD", "")
 
 
 class Buh1cAuthConfig:
@@ -69,24 +66,10 @@ class Buh1cAuthConfig:
     password: str = os.getenv("BUH_1C_PASSWORD", "")
 
 
-class ShowroomCronAuthConfig:
-    """Basic auth of the crontab wget line for /api/showroom/*. Empty: 503."""
-
-    username: str = os.getenv("SHOWROOM_CRON_USER", "")
-    password: str = os.getenv("SHOWROOM_CRON_PASSWORD", "")
-
-
 class ShowroomConfig:
     """Where the list of showrooms goes. Taken as it is: the slash at its end is part of the address."""
 
     bi_url: str = os.getenv("SHOWROOM_BI_URL", "").strip()
-
-
-class MailingCronAuthConfig:
-    """Basic auth of the crontab wget lines for /api/mailing/*. Empty: 503."""
-
-    username: str = os.getenv("MAILING_CRON_USER", "")
-    password: str = os.getenv("MAILING_CRON_PASSWORD", "")
 
 
 class MailingConfig:
@@ -356,12 +339,12 @@ class KlRecognitionConfig:
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
-sms_cron_auth_config = SmsCronAuthConfig()
-auto_sign_cron_auth_config = AutoSignCronAuthConfig()
+sms_cron_auth_config = CronAuthConfig("SMS_CRON")
+auto_sign_cron_auth_config = CronAuthConfig("AUTO_SIGN_CRON")
 buh_1c_auth_config = Buh1cAuthConfig()
-showroom_cron_auth_config = ShowroomCronAuthConfig()
+showroom_cron_auth_config = CronAuthConfig("SHOWROOM_CRON")
 showroom_config = ShowroomConfig()
-mailing_cron_auth_config = MailingCronAuthConfig()
+mailing_cron_auth_config = CronAuthConfig("MAILING_CRON")
 mailing_config = MailingConfig()
 auto_sign_config = AutoSignConfig()
 kcell_config = KcellConfig()

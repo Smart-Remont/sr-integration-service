@@ -1,29 +1,16 @@
-from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from asyncpg import Connection, Pool
 from fastapi import Depends
 
 from src.config import mailing_config
-from src.database.pool import get_db_pool
-from src.shared.cron_run import held_run_connection
+from src.shared.cron_run import run_connection_dep
 
 from .letter_queue import MailingQueueService
 from .repo import MailingRepository
 from .service import MailingFunctionsService
 from .smtp import SmtpTransport
 
-
-async def get_mailing_connection(
-    db_pool: Annotated[Pool, Depends(get_db_pool)],
-) -> AsyncGenerator[Connection]:
-    """No transaction stays open: each step commits on its own while the mail server waits."""
-    async with held_run_connection(db_pool, cron_name="Mailing") as connection:
-        yield connection
-
-
-# function scope: the connection, and with it the lock, goes back before the response is sent.
-_Connection = Annotated[Connection, Depends(get_mailing_connection, scope="function")]
+_Connection = run_connection_dep("Mailing")
 
 
 def get_smtp_transport_class() -> type[SmtpTransport]:

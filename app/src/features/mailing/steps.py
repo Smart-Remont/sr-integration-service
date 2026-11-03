@@ -10,7 +10,6 @@ from asyncpg import InterfaceError
 from loguru import logger
 
 from src.php_compat.pdo_errors import php_error_state
-from src.shared.cron_run import database_step_limit
 
 from .repo import MailingRepository
 
@@ -24,8 +23,7 @@ class MailingSteps:
         self.repository = repository
 
     async def take_lock(self, cron_name: str) -> bool:
-        async with database_step_limit():
-            locked = await self.repository.try_lock_run(cron_name)
+        locked = await self.repository.take_run_lock(f"mailing:{cron_name}")
         if not locked:
             logger.warning("{cron} skipped: the previous run is not finished", cron=cron_name)
         return locked
@@ -33,7 +31,7 @@ class MailingSteps:
     async def write[T](self, name: str, call: Callable[[MailingRepository], Awaitable[T]]) -> T:
         """A step that raises: the caller decides. Its error text can quote a letter, not logged."""
         try:
-            async with database_step_limit(), self.repository.transaction():
+            async with self.repository.step():
                 return await call(self.repository)
         except (InterfaceError, OSError, TimeoutError) as exc:
             logger.error("{step} failed: {error}", step=name, error=type(exc).__name__)

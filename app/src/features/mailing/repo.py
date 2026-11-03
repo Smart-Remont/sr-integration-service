@@ -1,34 +1,16 @@
 """Functions of the crons, one method each. The caller commits every step, as PHP calls them."""
 
-from asyncpg.transaction import Transaction
-
 from src.php_compat.pdo_values import NO_MODULE_CODE, pg_row
-from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
-from src.shared.advisory_lock import advisory_lock_key
+from src.shared.cron_run import CronRepository
 
-_LOCK_FUNCTION = "pg_catalog.pg_try_advisory_lock"
 _SET_CONFIG_FUNCTION = "pg_catalog.set_config"
 _NOTICE_SETTING = "myapp.notice"
 STATE_SENT = 1
 STATE_FAILED = 2
 
 
-class MailingRepository(BaseRepository):
-    """The connection stays outside a transaction while the mail server answers."""
-
-    def transaction(self) -> Transaction:
-        return self.connection.transaction()
-
-    async def try_lock_run(self, cron_name: str) -> bool:
-        """A session lock. It ends with the session or when the pool takes the connection back."""
-        rows = await self.call_sp(
-            _LOCK_FUNCTION,
-            advisory_lock_key(f"mailing:{cron_name}"),
-            module_code=NO_MODULE_CODE,
-        )
-        return scalar_from_sp_rows(rows) is True
-
+class MailingRepository(CronRepository):
     async def _read(self, function: str, *args: object) -> SpRows:
         rows = await self.call_sp(function, *args, cursor=True, module_code=NO_MODULE_CODE)
         return [pg_row(row) for row in rows]

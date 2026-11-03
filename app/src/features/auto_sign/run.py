@@ -6,7 +6,6 @@ from loguru import logger
 
 from src.php_compat.pdo_errors import php_error_state
 from src.repository.base import SpRows
-from src.shared.cron_run import database_step_limit
 
 from .repo import AutoSignRepository
 
@@ -20,12 +19,10 @@ async def read_rows_under_run_lock(
     # Cron fires again while a run goes on, and wget repeats after its timeout while the service still
     # works on the first request. Without the lock both runs would take the same rows.
     try:
-        async with database_step_limit():
-            locked = await repository.try_lock_run(run_name)
-        if not locked:
+        if not await repository.take_run_lock(run_name):
             logger.warning("Cron run skipped, the previous one goes on | run={run}", run=run_name)
             return []
-        async with database_step_limit(), repository.transaction():
+        async with repository.step():
             rows = await read_rows(repository)
     except Exception as exc:
         # Class or SQLSTATE only, here and in these crons: database texts can quote an IIN.

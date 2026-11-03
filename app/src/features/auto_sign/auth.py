@@ -1,12 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.config import auto_sign_config, auto_sign_cron_auth_config, minio_config
-from src.security import basic_auth_dependency
+from src.security import cron_basic_auth
 
 # PHP checked nobody: any caller could trigger a company signature.
-require_auto_sign_cron_auth = Depends(
-    basic_auth_dependency(auto_sign_cron_auth_config, api_name="Auto sign cron"),
-)
+require_auto_sign_cron_auth = cron_basic_auth(auto_sign_cron_auth_config, "Auto sign cron")
 
 
 def require_signing_config() -> None:

@@ -1,10 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.config import kcell_config, sms_cron_auth_config
-from src.security import basic_auth_dependency
+from src.security import cron_basic_auth
 
 # PHP checked nobody: any caller could trigger the sending of the queue.
-require_sms_cron_auth = Depends(basic_auth_dependency(sms_cron_auth_config, api_name="SMS cron"))
+require_sms_cron_auth = cron_basic_auth(sms_cron_auth_config, "SMS cron")
 
 
 def require_kcell_send_config() -> None:

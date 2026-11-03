@@ -1,12 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.config import mailing_config, mailing_cron_auth_config
-from src.security import basic_auth_dependency
+from src.security import cron_basic_auth
 
 # PHP checked nobody: any caller could trigger the sending of the queue.
-require_mailing_cron_auth = Depends(
-    basic_auth_dependency(mailing_cron_auth_config, api_name="Mailing cron"),
-)
+require_mailing_cron_auth = cron_basic_auth(mailing_cron_auth_config, "Mailing cron")
 
 
 def require_queue_config() -> None:

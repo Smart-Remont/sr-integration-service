@@ -14,7 +14,7 @@ from loguru import logger
 from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.text import php_int
 from src.repository.base import SpRow
-from src.shared.cron_run import database_step_limit, run_stop_requested
+from src.shared.cron_run import run_stop_requested
 from src.shared.mynca_client import MyncaClient
 from src.storage.minio_client import put_object
 from src.storage.modes import logical_path_to_object_key, php_uniqid
@@ -61,7 +61,7 @@ class DocumentUploadService:
             )
 
     async def _upload_document(self, client_request_id: int, sign_cnt: int) -> None:
-        async with database_step_limit(), self._repository.transaction():
+        async with self._repository.step():
             group = await self._repository.sign_group_id_get_by_client_request(client_request_id)
         group_id = group.get("sign_group_id") if group else None
         if not group_id:
@@ -86,7 +86,7 @@ class DocumentUploadService:
                 body=answer.raw,
                 content_type=_PDF_TYPE,
             )
-        async with database_step_limit(), self._repository.transaction():
+        async with self._repository.step():
             await self._repository.sign_document_upd(
                 client_request_id=client_request_id,
                 sign_doc_name=f"Договор_оказания_услуг_{client_request_id}.pdf",

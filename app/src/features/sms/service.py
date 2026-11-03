@@ -35,7 +35,7 @@ from src.repository.base import SpRow
 from src.shared.cron_run import database_step_limit, run_stop_requested
 
 from .client import KcellClient, KcellRequestError
-from .repo import SmsRepository
+from .repo import SEND_RUN_LOCK, STATUS_RUN_LOCK, SmsRepository
 from .responses import (
     DONE_TEXT,
     NO_BATCHES_TEXT,
@@ -58,12 +58,10 @@ class SmsService:
         # Cron fires every minute and a run can last longer. Without the lock the next run would
         # read the same messages and send them again, since a result is recorded only after Kcell.
         try:
-            async with database_step_limit():
-                locked = await self.repository.try_lock_send_run()
-            if not locked:
+            if not await self.repository.take_run_lock(SEND_RUN_LOCK):
                 logger.warning("SMS send run skipped: the previous run is not finished")
                 return cron_text_response(RUN_BUSY_TEXT)
-            async with database_step_limit(), self.repository.transaction():
+            async with self.repository.step():
                 messages = await self.repository.sms_notify__read()
         except Exception as exc:
             # readSP gives an empty list on an error, and PHP answers as for an empty queue.
@@ -81,12 +79,10 @@ class SmsService:
 
     async def check_batch_statuses(self) -> Response:
         try:
-            async with database_step_limit():
-                locked = await self.repository.try_lock_status_run()
-            if not locked:
+            if not await self.repository.take_run_lock(STATUS_RUN_LOCK):
                 logger.warning("SMS status run skipped: the previous run is not finished")
                 return cron_text_response(RUN_BUSY_TEXT)
-            async with database_step_limit(), self.repository.transaction():
+            async with self.repository.step():
                 batches = await self.repository.sms_notify_batch__read()
         except Exception as exc:
             _log_failure("sms_notify_batch__read", exc)
@@ -141,7 +137,7 @@ class SmsService:
             )
             return True
         try:
-            async with database_step_limit(), self.repository.transaction():
+            async with self.repository.step():
                 await self.repository.sms_notify_result__set(
                     ids=ids,
                     batch_id=batch_id,

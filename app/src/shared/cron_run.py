@@ -1,4 +1,5 @@
-"""What crons moved from PHP share: a time limit per database step, one held connection, the stop signal.
+"""What crons moved from PHP share: a time limit per database step, one held connection, the run lock,
+the stop signal.
 
 A run keeps its connection, and with it the session advisory lock, from start to end. No transaction
 stays open on it while a partner answers: each database step commits on its own.
@@ -7,19 +8,28 @@ stays open on it while a partner answers: each database step commits on its own.
 import asyncio
 import signal
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from types import FrameType
+from typing import Annotated, Any
 
 from asyncpg import Connection, Pool
-from fastapi import HTTPException, status
+from asyncpg.transaction import Transaction
+from fastapi import Depends, HTTPException, status
 from loguru import logger
+
+from src.database.pool import get_db_pool
+from src.php_compat.pdo_values import NO_MODULE_CODE
+from src.repository import BaseRepository, scalar_from_sp_rows
+
+from .advisory_lock import advisory_lock_key
 
 DB_STEP_SECONDS = 60.0
 # At the limit asyncpg asks the server to cancel the query, and a transaction then rolls back. On an
 # unreachable server that rollback would wait for the cancel forever, and this margin ends the wait.
 ROLLBACK_MARGIN_SECONDS = 10.0
 _RELEASE_SECONDS = DB_STEP_SECONDS
+_LOCK_FUNCTION = "pg_catalog.pg_try_advisory_lock"
 _stop_requested = False
 
 
@@ -93,3 +103,41 @@ async def _release_connection(db_pool: Pool, connection: Connection, cron_name: 
             cron_name=cron_name,
             error=type(exc).__name__,
         )
+
+
+def run_connection_dep(cron_name: str) -> Any:
+    """The connection of a run as a dependency. No transaction stays open on it.
+
+    Function scope: the connection, and with it the lock, goes back before the response is sent.
+    """
+
+    async def get_run_connection(
+        db_pool: Annotated[Pool, Depends(get_db_pool)],
+    ) -> AsyncGenerator[Connection]:
+        async with held_run_connection(db_pool, cron_name=cron_name) as connection:
+            yield connection
+
+    return Annotated[Connection, Depends(get_run_connection, scope="function")]
+
+
+class CronRepository(BaseRepository):
+    """On the connection of a run: it stays outside a transaction while a partner answers."""
+
+    def transaction(self) -> Transaction:
+        return self.connection.transaction()
+
+    @asynccontextmanager
+    async def step(self, seconds: float | None = None) -> AsyncIterator[None]:
+        """One database step: its own transaction, committed at the end, with a time limit."""
+        async with database_step_limit(seconds), self.transaction():
+            yield
+
+    async def take_run_lock(self, run_name: str) -> bool:
+        """A session lock. It ends with the session or when the pool takes the connection back."""
+        async with database_step_limit():
+            rows = await self.call_sp(
+                _LOCK_FUNCTION,
+                advisory_lock_key(run_name),
+                module_code=NO_MODULE_CODE,
+            )
+        return scalar_from_sp_rows(rows) is True

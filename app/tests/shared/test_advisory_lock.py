@@ -4,7 +4,7 @@ import pytest
 
 from src.features.client_sign.repo import sign_process_lock_key
 from src.features.kaspi.repo import account_lock_key
-from src.features.sms.repo import _SEND_RUN_LOCK_KEY
+from src.features.sms.repo import SEND_RUN_LOCK
 from src.shared.advisory_lock import advisory_lock_key
 
 
@@ -17,7 +17,7 @@ def test_key_is_the_first_eight_bytes_of_sha256_as_a_signed_bigint() -> None:
 @pytest.mark.parametrize(
     ("key", "literal"),
     [
-        (_SEND_RUN_LOCK_KEY, 3165429436431270518),
+        (advisory_lock_key(SEND_RUN_LOCK), 3165429436431270518),
         (account_lock_key("77"), -6293096633168283247),
         (sign_process_lock_key("abc"), 3684406432042435101),
         (advisory_lock_key("auto-sign:cron-auto-sign-operator"), 1678123067878273961),

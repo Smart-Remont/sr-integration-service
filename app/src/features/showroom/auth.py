@@ -1,12 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.config import showroom_config, showroom_cron_auth_config
-from src.security import basic_auth_dependency
+from src.security import cron_basic_auth
 
 # PHP checked nobody: any caller could send the list to BI Group.
-require_showroom_cron_auth = Depends(
-    basic_auth_dependency(showroom_cron_auth_config, api_name="Showroom cron"),
-)
+require_showroom_cron_auth = cron_basic_auth(showroom_cron_auth_config, "Showroom cron")
 
 
 def require_showroom_bi_config() -> None:

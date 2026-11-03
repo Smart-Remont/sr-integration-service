@@ -163,7 +163,7 @@ class OperatorSigningService:
         dblink, no http. It uses up sequence values of ``sign_tab`` and ``stack_tab``.
         """
         try:
-            async with database_step_limit(), self._repository.transaction():
+            async with self._repository.step():
                 await self._insert_signature(row, target, _DRY_RUN_DN_NAME)
                 raise _DryRunFinished
         except _DryRunFinished:
@@ -178,7 +178,7 @@ class OperatorSigningService:
 
     async def _active_company_key(self, company_id: object, sign_id: object) -> _CompanyKey | None:
         try:
-            async with database_step_limit(), self._repository.transaction():
+            async with self._repository.step():
                 key_row = await self._repository.company_key_store__get_active_by_company(
                     int(str(company_id)),
                     self._master_key,
@@ -350,7 +350,7 @@ class OperatorSigningService:
         """One transaction, so both calls stay or go together and a rollback at MyNCA stays true."""
         reached_commit = False
         try:
-            async with database_step_limit(), self._repository.transaction():
+            async with self._repository.step():
                 new_sign_id = await self._insert_signature(
                     row,
                     sign_target(row),

@@ -3,31 +3,16 @@
 Rows with a company key do not go through ``pg_row``: it would turn the key bytes into text.
 """
 
-from asyncpg.transaction import Transaction
-
 from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_text, pg_row
-from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
-from src.shared.advisory_lock import advisory_lock_key
+from src.shared.cron_run import CronRepository
 
 _INT = "integer"
 _UUID = "uuid"
 _BOOLEAN = "boolean"
 
 
-class AutoSignRepository(BaseRepository):
-    def transaction(self) -> Transaction:
-        return self.connection.transaction()
-
-    async def try_lock_run(self, run_name: str) -> bool:
-        """A session lock. It ends with the session or when the pool takes the connection back."""
-        rows = await self.call_sp(
-            "pg_catalog.pg_try_advisory_lock",
-            advisory_lock_key(run_name),
-            module_code=NO_MODULE_CODE,
-        )
-        return scalar_from_sp_rows(rows) is True
-
+class AutoSignRepository(CronRepository):
     async def sign_read_for_auto_sign_operator(self) -> SpRows:
         return await self._read_cursor("public.sign_read_for_auto_sign_operator")
 

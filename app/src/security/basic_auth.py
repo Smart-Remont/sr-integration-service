@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from secrets import compare_digest
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -24,6 +24,11 @@ def basic_auth_dependency(
         verify_basic_credentials(config, credentials, api_name=api_name)
 
     return verify
+
+
+def cron_basic_auth(config: BasicCredentialsConfig, name: str) -> Any:
+    """The router dependency of a cron. Its name is in the text of the 503 of an empty setting."""
+    return Depends(basic_auth_dependency(config, api_name=name))
 
 
 def verify_basic_credentials(
