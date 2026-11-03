@@ -7,13 +7,18 @@ from src.php_compat.text import zero_to_null
 from src.repository import BaseRepository
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.advisory_lock import advisory_lock_key
-from src.shared.cron_run import database_step_limit
+from src.shared.pool_step import pool_step
+from src.shared.sign_tab import (
+    SignTabCall,
+    id_by_process_call,
+    insert_sign_general_call,
+    sign_tab_modify_call,
+)
 
 from .doc_types import DocumentType
 from .errors import ClientSignDatabaseError
 
 _INT = "integer"
-_UUID = "uuid"
 _LOCK_KEY_PREFIX = "client-sign:"
 _INVALID_ENCODING_STATE = "22021"
 _DOCUMENT_FUNCTIONS = {
@@ -60,9 +65,7 @@ class ClientSignRepository(BaseRepository):
             raise ClientSignDatabaseError.from_exception(exc) from exc
 
     async def sign_by_process(self, sign_process_id: str) -> SpRow | None:
-        rows = await self._call(
-            "client.sign_tab__id_by_process", (sign_process_id,), (_UUID,), cursor=True
-        )
+        rows = await self._run(id_by_process_call(sign_process_id), cursor=True)
         return pg_row(rows[0]) if rows else None
 
     async def insert_sign_general(
@@ -74,22 +77,16 @@ class ClientSignRepository(BaseRepository):
         sign_type_code: str,
         dn_name: str,
     ) -> object | None:
-        rows = await self._call(
-            "client.insert_sign_general",
-            (
-                pdo_text(client_request_id),
-                pdo_text(ds_id),
-                pdo_text(client_request_document_id),
-                sign_type_code,
-                # The signed document itself stays in MyNCA, sign_tab keeps a marker.
-                "SIGN_CMS",
-                "SIGN_CMS",
-                None,
-                dn_name,
-                "MYNCA",
-                None,
-            ),
-            (_INT, _INT, _INT, None, None, None, None, None, None, _INT),
+        rows = await self._run(
+            insert_sign_general_call(
+                client_request_id=client_request_id,
+                ds_id=ds_id,
+                client_request_document_id=client_request_document_id,
+                sign_type_code=sign_type_code,
+                dn_name=dn_name,
+                source="MYNCA",
+                sign_pid=None,
+            )
         )
         return scalar_from_sp_rows(rows)
 
@@ -100,11 +97,16 @@ class ClientSignRepository(BaseRepository):
         sign_process_id: str,
         sign_group_id: str | None,
     ) -> None:
-        await self._call(
-            "client.sign_tab__modify",
-            (pdo_text(sign_id), sign_process_id, sign_group_id, "CMS", None),
-            (_INT, _UUID, _UUID, None, None),
+        await self._run(
+            sign_tab_modify_call(
+                sign_id=sign_id,
+                sign_process_id=sign_process_id,
+                sign_group_id=sign_group_id,
+            )
         )
+
+    async def _run(self, call: SignTabCall, *, cursor: bool = False) -> SpRows:
+        return await self._call(call.function, call.args, call.casts, cursor=cursor)
 
     async def _read_cursor(self, function: str, client_request_id: int | None) -> SpRows:
         rows = await self._call(function, (pdo_text(client_request_id),), (_INT,), cursor=True)
@@ -143,12 +145,10 @@ class ClientSignDatabase:
         The limit covers all of it, also the wait of a repeated callback in ``lock_sign_process``.
         """
         try:
-            async with (
-                database_step_limit(),
-                self._pool.acquire() as connection,
-                connection.transaction(),
-            ):
-                return await action(ClientSignRepository(connection=connection))
+            return await pool_step(
+                self._pool,
+                lambda connection: action(ClientSignRepository(connection=connection)),
+            )
         except (PostgresError, InterfaceError, OSError, TimeoutError) as exc:
             raise ClientSignDatabaseError.from_exception(exc) from exc
 

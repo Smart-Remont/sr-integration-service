@@ -7,7 +7,7 @@ from src.php_compat.pdo_errors import php_error_state, php_pdo_message
 from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_bound_text, pdo_text
 from src.php_compat.session_plans import plan_like_a_new_php_session
 from src.repository import BaseRepository, scalar_from_sp_rows
-from src.shared.cron_run import database_step_limit
+from src.shared.pool_step import pool_step
 
 from .errors import Buh1cFunctionError
 
@@ -64,13 +64,18 @@ class Buh1cDatabase:
         ``/dict/permission`` there, which is no answer for 1C either. Errors of ``acquire`` are this
         case too, even those of the ``PostgresError`` family.
         """
-        async with database_step_limit(), self._pool.acquire() as connection:
-            try:
-                async with connection.transaction():
-                    await plan_like_a_new_php_session(connection)
-                    return await action(Buh1cRepository(connection=connection))
-            except (PostgresError, InfrastructureError) as exc:
-                state = php_error_state(exc)
-                if state.startswith(_NO_DATABASE_STATE_CLASS) or state in _NO_DATABASE_STATES:
-                    raise
-                raise Buh1cFunctionError(php_pdo_message(exc), state=state) from exc
+        return await pool_step(
+            self._pool,
+            lambda connection: action(Buh1cRepository(connection=connection)),
+            prepare=plan_like_a_new_php_session,
+            to_error=_function_error,
+        )
+
+
+def _function_error(exc: Exception) -> Buh1cFunctionError | None:
+    if not isinstance(exc, PostgresError | InfrastructureError):
+        return None
+    state = php_error_state(exc)
+    if state.startswith(_NO_DATABASE_STATE_CLASS) or state in _NO_DATABASE_STATES:
+        return None
+    return Buh1cFunctionError(php_pdo_message(exc), state=state)

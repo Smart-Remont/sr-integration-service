@@ -3,7 +3,7 @@ from asyncpg import InterfaceError, Pool
 from src.php_compat.pdo_errors import php_error_state
 from src.php_compat.pdo_values import NO_MODULE_CODE
 from src.repository import BaseRepository, scalar_from_sp_rows
-from src.shared.cron_run import database_step_limit
+from src.shared.pool_step import pool_step
 
 
 class ShowroomFunctionError(Exception):
@@ -24,12 +24,15 @@ class ShowroomDatabase:
         self._pool = pool
 
     async def read_list(self) -> str | None:
-        async with database_step_limit(), self._pool.acquire() as connection:
-            try:
-                async with connection.transaction():
-                    return await ShowroomRepository(connection).read_marketing_remont_list()
-            except InterfaceError, OSError, TimeoutError:
-                # No database or no answer in time. In PHP this is a redirect, and nothing is sent.
-                raise
-            except Exception as exc:
-                raise ShowroomFunctionError(php_error_state(exc)) from exc
+        return await pool_step(
+            self._pool,
+            lambda connection: ShowroomRepository(connection).read_marketing_remont_list(),
+            to_error=_function_error,
+        )
+
+
+def _function_error(exc: Exception) -> ShowroomFunctionError | None:
+    # No database or no answer in time. In PHP this is a redirect, and nothing is sent.
+    if isinstance(exc, InterfaceError | OSError | TimeoutError):
+        return None
+    return ShowroomFunctionError(php_error_state(exc))

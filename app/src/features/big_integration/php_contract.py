@@ -7,10 +7,10 @@ in CLAUDE.md); the handlers turn them into the response PHP gave.
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.security import HTTPBasic
 from loguru import logger
 
 from src.config import big_integration_auth_config
+from src.php_compat.basic_auth import php_basic_credentials
 from src.php_compat.json_codec import php_json_encode, php_json_encode_pretty
 from src.php_compat.pdo_errors import php_error_state, php_refusal_log_level
 from src.php_compat.responses import PHP_HTML_CONTENT_TYPE, PHP_WWW_AUTHENTICATE
@@ -21,7 +21,6 @@ from .errors import BigIntegrationDatabaseError
 _CONTENT_TYPE = "application/json"
 _CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate, max-age=0"}
 _METHOD_NOT_ALLOWED = "Неподдерживаемый метод"
-_http_basic = HTTPBasic(auto_error=False)
 
 
 # As in ``_getBiErrorCode``, where P003 is missing from the list: it gives P400 too.
@@ -132,12 +131,8 @@ def register_big_integration_handlers(app: FastAPI) -> None:
 
 
 async def _require_php_basic_auth(request: Request) -> None:
-    try:
-        credentials = await _http_basic(request)
-    except HTTPException as exc:
-        raise BigIntegrationUnauthorizedError from exc
-    # PHP fills PHP_AUTH_USER only for this exact prefix, FastAPI ignores the case of the scheme.
-    if credentials is None or not request.headers.get("authorization", "").startswith("Basic "):
+    credentials = await php_basic_credentials(request)
+    if credentials is None:
         raise BigIntegrationUnauthorizedError
     try:
         verify_basic_credentials(

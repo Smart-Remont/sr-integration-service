@@ -6,9 +6,14 @@ Rows with a company key do not go through ``pg_row``: it would turn the key byte
 from src.php_compat.pdo_values import NO_MODULE_CODE, pdo_text, pg_row
 from src.repository.base import SpRow, SpRows, scalar_from_sp_rows
 from src.shared.cron_run import CronRepository
+from src.shared.sign_tab import (
+    SignTabCall,
+    id_by_process_call,
+    insert_sign_general_call,
+    sign_tab_modify_call,
+)
 
 _INT = "integer"
-_UUID = "uuid"
 _BOOLEAN = "boolean"
 
 
@@ -41,21 +46,16 @@ class AutoSignRepository(CronRepository):
         dn_name: str,
         sign_pid: int,
     ) -> object | None:
-        rows = await self.call_sp(
-            "client.insert_sign_general",
-            pdo_text(client_request_id),
-            pdo_text(ds_id),
-            pdo_text(client_request_document_id),
-            sign_type_code,
-            # The signed document itself stays in MyNCA, sign_tab keeps a marker.
-            "SIGN_CMS",
-            "SIGN_CMS",
-            None,
-            dn_name,
-            "MYNCA_AUTO",
-            pdo_text(sign_pid),
-            module_code=NO_MODULE_CODE,
-            text_casts=(_INT, _INT, _INT, None, None, None, None, None, None, _INT),
+        rows = await self._run(
+            insert_sign_general_call(
+                client_request_id=client_request_id,
+                ds_id=ds_id,
+                client_request_document_id=client_request_document_id,
+                sign_type_code=sign_type_code,
+                dn_name=dn_name,
+                source="MYNCA_AUTO",
+                sign_pid=sign_pid,
+            )
         )
         return scalar_from_sp_rows(rows)
 
@@ -66,26 +66,26 @@ class AutoSignRepository(CronRepository):
         sign_process_id: str,
         sign_group_id: str | None,
     ) -> None:
-        await self.call_sp(
-            "client.sign_tab__modify",
-            pdo_text(sign_id),
-            sign_process_id,
-            sign_group_id,
-            "CMS",
-            None,
-            module_code=NO_MODULE_CODE,
-            text_casts=(_INT, _UUID, _UUID, None, None),
+        await self._run(
+            sign_tab_modify_call(
+                sign_id=sign_id,
+                sign_process_id=sign_process_id,
+                sign_group_id=sign_group_id,
+            )
         )
 
     async def sign_tab__id_by_process(self, sign_process_id: str) -> SpRow | None:
-        rows = await self.call_sp(
-            "client.sign_tab__id_by_process",
-            sign_process_id,
-            cursor=True,
-            module_code=NO_MODULE_CODE,
-            text_casts=(_UUID,),
-        )
+        rows = await self._run(id_by_process_call(sign_process_id), cursor=True)
         return rows[0] if rows else None
+
+    async def _run(self, call: SignTabCall, *, cursor: bool = False) -> SpRows:
+        return await self.call_sp(
+            call.function,
+            *call.args,
+            cursor=cursor,
+            module_code=NO_MODULE_CODE,
+            text_casts=call.casts,
+        )
 
     def session_pid(self) -> int:
         return self.connection.get_server_pid()
