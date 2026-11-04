@@ -145,14 +145,7 @@ app/
 4. Новые переменные env — в `config.py` и `app/.env.example` с комментарием.
 5. Тесты, `ruff`, `pytest`. Запись в документ фичи в `../myspace/features/<фича>/`.
 
-## Запуск на сервере
-
-- Docker: `Dockerfile` (uv из зафиксированной версии, пользователь без root, `HEALTHCHECK` по `/health`), `docker-compose.yaml` публикует порт только на `127.0.0.1:9020` — снаружи сервис доступен только через nginx.
-- Переменные — `app/.env` через `env_file` в compose. В образ `.env` не попадает (`.dockerignore`).
-- `GET /health` — процесс жив; `GET /health/ready` — есть связь с PostgreSQL.
-- Пул БД: `DB_POOL_MAX_SIZE` на каждый воркер gunicorn, всего соединений = `GUNICORN_WORKERS × DB_POOL_MAX_SIZE`.
-
-### Крон
+## Кроны
 
 Расписание живёт в `/etc/crontab` на сервере office, планировщика в самой базе нет. Два вида строк:
 
@@ -160,6 +153,13 @@ app/
 - `wget` на ручку крона, перенесённого из PHP: `wget -q -O /dev/null --tries=1 --timeout=<с запасом над запуском> --auth-no-challenge --config=/etc/sr/<группа>.wgetrc http://127.0.0.1:9020/api/...`. Вход Basic, пароль в файле настроек с правами 600. `--tries=1` обязателен: запуск без него повторится поверх идущего. Новую строку ставят одним шагом со снятием строки PHP (`../myspace/features/legacy-integrations/ROLLOUT.md`), вместе они отправят всё дважды.
 
 Запуск крона держит одно соединение: `run_connection_dep`, `CronRepository.take_run_lock`, шаг `CronRepository.step`. По SIGTERM запуск заканчивается между строками (`run_stop_requested`), но идущий внутри строки вызов партнёра может быть длиннее `GUNICORN_GRACEFUL_TIMEOUT`, и тогда воркер убьют на середине. Поэтому перед выкаткой строки кронов снимают и дожидаются конца запуска.
+
+## Запуск на сервере
+
+- Docker: `Dockerfile` (uv из зафиксированной версии, пользователь без root, `HEALTHCHECK` по `/health`), `docker-compose.yaml` публикует порт только на `127.0.0.1:9020` — снаружи сервис доступен только через nginx.
+- Переменные — `app/.env` через `env_file` в compose. В образ `.env` не попадает (`.dockerignore`).
+- `GET /health` — процесс жив; `GET /health/ready` — есть связь с PostgreSQL.
+- Пул БД: `DB_POOL_MAX_SIZE` на каждый воркер gunicorn, всего соединений = `GUNICORN_WORKERS × DB_POOL_MAX_SIZE`.
 
 ## Технический долг
 
