@@ -546,15 +546,33 @@ async def test_kitchen_niche_is_a_studio_with_areas_kept_apart(
     assert [room["area"] for room in result["rooms"]] == [7.93, 15.26]
 
 
-async def test_plain_kitchen_is_a_studio_only_when_open_to_the_living_room(
+async def test_plain_kitchen_seen_as_open_is_a_doubt_not_a_studio(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # кв. 237: на листе сплошная стена, а модель отметила кухню открытой
+    open_to = {"name": "Гостиная", "area": 15.26}
+    kitchen = {"name": "Кухня", "area": 6.29}
+    opened = await recognize_rooms(
+        client, composer, kitchen_rooms({**kitchen, "openTo": open_to}, LIVING)
+    )
+    assert opened["status"] == "recognized"
+    assert opened["is_kitchen_studio"] is False
+    assert any("открыта в гостиную" in doubt for doubt in opened["doubts"])
+    walled = await recognize_rooms(
+        client, composer, kitchen_rooms({**kitchen, "openTo": None}, LIVING)
+    )
+    assert walled["is_kitchen_studio"] is False
+    assert not any("открыта в гостиную" in doubt for doubt in walled["doubts"])
+
+
+async def test_labelled_niche_does_not_need_a_doubt(
     client: AsyncClient, composer: AsyncMock
 ) -> None:
     open_to = {"name": "Гостиная", "area": 15.26}
-    kitchen = {"name": "Кухня", "area": 6.29}
-    opened = kitchen_rooms({**kitchen, "openTo": open_to}, LIVING)
-    assert (await recognize_rooms(client, composer, opened))["is_kitchen_studio"] is True
-    walled = kitchen_rooms({**kitchen, "openTo": None}, LIVING)
-    assert (await recognize_rooms(client, composer, walled))["is_kitchen_studio"] is False
+    niche = {"name": "Кухня-ниша", "area": 6.59, "openTo": open_to}
+    result = await recognize_rooms(client, composer, kitchen_rooms(niche, LIVING))
+    assert result["is_kitchen_studio"] is True
+    assert not any("открыта в гостиную" in doubt for doubt in result["doubts"])
 
 
 async def test_wardrobe_niche_does_not_make_a_studio(

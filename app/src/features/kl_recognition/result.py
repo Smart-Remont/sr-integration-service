@@ -12,6 +12,7 @@ from .room_mapping import (
     is_kitchen_studio,
     is_terrace,
     merge_open_storage,
+    note_guessed_studio,
     note_kitchen_without_living_room,
     room_type,
     room_type_by_name,
@@ -174,6 +175,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
     terraces = [room for room in read if is_terrace(room.name)]
     read = merge_open_storage([room for room in read if not is_terrace(room.name)], doubts)
     note_kitchen_without_living_room(read, doubts)
+    note_guessed_studio(read, doubts)
     studio = is_kitchen_studio(read)
     targets = system_rooms([room.kind for room in read], [room.area for room in read])
     return (

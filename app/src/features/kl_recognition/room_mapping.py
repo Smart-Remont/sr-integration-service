@@ -148,20 +148,32 @@ OPEN_KITCHEN_WORDS = ("ниш", "студи")
 
 
 def is_kitchen_studio(rooms: list[ReadRoom]) -> bool:
-    """A kitchen with no wall to the living room: areas stay apart, only the flag is set
+    """A kitchen labelled as a niche or a studio: areas stay apart, only the flag is set
     (planirovki since 2025: «Кухня-ниша» next to «Гостиная», never summed). Needs a living room:
-    `check_rooms` in myspace lets a plan without one through only with this flag."""
-    living = [room for room in rooms if room.kind is RoomType.LIVING_ROOM]
-    if not living:
+    `check_rooms` in myspace lets a plan without one through only with this flag.
+
+    Only the printed label sets it: the agent's own guess was wrong on a solid wall
+    (SHABYT 1, кв. 237), so a guess goes to the operator, see `note_guessed_studio`."""
+    if not any(room.kind is RoomType.LIVING_ROOM for room in rooms):
         return False
+    return any(room.kind is RoomType.KITCHEN and _labelled_open(room) for room in rooms)
+
+
+def _labelled_open(room: ReadRoom) -> bool:
+    return any(word in room.name.casefold() for word in OPEN_KITCHEN_WORDS)
+
+
+def note_guessed_studio(rooms: list[ReadRoom], doubts: list[str]) -> None:
+    """A kitchen the agent sees as open to the living room, though the label does not say so."""
+    living = [room for room in rooms if room.kind is RoomType.LIVING_ROOM]
     for room in rooms:
-        if room.kind is not RoomType.KITCHEN:
+        if room.kind is not RoomType.KITCHEN or _labelled_open(room) or not room.open_to:
             continue
-        if any(word in room.name.casefold() for word in OPEN_KITCHEN_WORDS):
-            return True
-        if room.open_to and any(abs(other.area - room.open_to[1]) < 0.005 for other in living):
-            return True
-    return False
+        if any(abs(other.area - room.open_to[1]) < 0.005 for other in living):
+            doubts.append(
+                f"«{room.name}» {room.area}: похоже, кухня открыта в гостиную, но в подписи этого нет. "
+                "Признак студии не поставлен: сверьте с листом"
+            )
 
 
 def note_kitchen_without_living_room(rooms: list[ReadRoom], doubts: list[str]) -> None:
