@@ -171,13 +171,13 @@ def note_kitchen_without_living_room(rooms: list[ReadRoom], doubts: list[str]) -
     for room in rooms:
         if room.kind is RoomType.KITCHEN:
             doubts.append(
-                f"«{room.name}» {room.area}: гостиной на листе нет, кухня и гостиная, видимо, "
-                "одно помещение — разделите площадь вручную"
+                f"«{room.name}» {room.area}: гостиной на листе нет. Посмотрите, какая комната "
+                "гостиная; если кухня и гостиная одно помещение, разделите площадь вручную"
             )
 
 
-# Latin letters that look like Cyrillic ones: models sometimes mix them into Russian words.
-_LOOKALIKES = str.maketrans("aceopxykmthbACEOPXYKMTHB", "асеорхукмтнвАСЕОРХУКМТНВ")
+# Latin letters models mix into Russian words: lookalikes and «Гостinая» (SHABYT 1, MERIDIAN 1).
+_LOOKALIKES = str.maketrans("aceopxykmthbinACEOPXYKMTHBIN", "асеорхукмтнвинАСЕОРХУКМТНВИН")
 _BY_NAME = {kind.value.casefold(): kind for kind in RoomType}
 TYPE_MATCH_CUTOFF = 0.85
 
@@ -192,6 +192,11 @@ def room_type(value: object) -> RoomType | None:
     # one stray Latin letter («Gостиная»); a different word stays unknown
     close = get_close_matches(key, _BY_NAME, n=1, cutoff=TYPE_MATCH_CUTOFF)
     return _BY_NAME[close[0]] if close else None
+
+
+def room_type_by_name(name: object) -> RoomType | None:
+    """The type when the label is exactly a type name; «Кухня-ниша» or «Мастер спальня» stay unknown."""
+    return _BY_NAME.get(str(name).strip().translate(_LOOKALIKES).casefold())
 
 
 def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:

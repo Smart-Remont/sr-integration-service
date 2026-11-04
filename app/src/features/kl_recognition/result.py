@@ -14,6 +14,7 @@ from .room_mapping import (
     merge_open_storage,
     note_kitchen_without_living_room,
     room_type,
+    room_type_by_name,
     system_rooms,
 )
 from .schemas import (
@@ -136,7 +137,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
             doubts.append(f"запись комнаты без названия или площади: {raw}")
             continue
         financial = _as_float(raw.get("financialArea", raw.get("financial_area")))
-        kind = room_type(raw.get("type"))
+        kind = room_type(raw.get("type")) or room_type_by_name(raw["name"])
         if kind is None:
             doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
             kind = RoomType.OTHER
@@ -256,9 +257,9 @@ def build_result(
     return KlRecognitionResult(
         status=status,
         reason=reason,
-        # Unrecognised sheets carry no rooms: the planirovka is entered by hand, and half-read
-        # rooms must not be mistaken for a result. Sums and doubts still explain what failed.
-        rooms=rooms if status is RecognitionStatus.RECOGNIZED else [],
+        # Unrecognised sheets carry what was read too: the operator checks it against the sheet
+        # instead of typing every room. The status, sums and doubts say it is not a result.
+        rooms=rooms,
         is_kitchen_studio=studio if status is RecognitionStatus.RECOGNIZED else False,
         terraces=[KlRoomPart(name=t.name, area=t.area) for t in terraces]
         if status is RecognitionStatus.RECOGNIZED
