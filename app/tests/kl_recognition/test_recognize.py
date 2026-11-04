@@ -4,7 +4,9 @@ from the sums, never taken from the agent."""
 
 import asyncio
 import base64
+import dataclasses
 import json
+import os
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -95,6 +97,21 @@ async def recognize(client: AsyncClient, body: dict[str, Any] | None = None) -> 
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def test_meta_reports_the_time_of_each_stage(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    composer.read_plan.return_value = dataclasses.replace(composer_answer(), slot_wait_seconds=1.25)
+
+    meta = (await recognize(client))["meta"]
+
+    assert meta["seconds"] == 17
+    assert meta["slot_wait_seconds"] == 1.25
+    assert meta["sheet_seconds"] >= 0
+    assert meta["image_wait_seconds"] >= 0
+    assert meta["image_seconds"] >= 0
+    assert meta["worker_pid"] == os.getpid()
 
 
 async def test_requires_basic_auth(client: AsyncClient) -> None:

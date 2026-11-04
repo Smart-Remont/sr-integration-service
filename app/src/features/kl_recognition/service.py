@@ -1,4 +1,6 @@
 import asyncio
+import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -48,11 +50,13 @@ def _plus(a: int | None, b: int | None) -> int | None:
 
 def _add(meta: KlRecognitionMeta, answer: ComposerAnswer) -> KlRecognitionMeta:
     """Time and tokens of all Composer calls for one sheet."""
-    return KlRecognitionMeta(
-        model=meta.model,
-        seconds=_plus(meta.seconds, answer.seconds),
-        input_tokens=_plus(meta.input_tokens, answer.input_tokens),
-        output_tokens=_plus(meta.output_tokens, answer.output_tokens),
+    return meta.model_copy(
+        update={
+            "seconds": _plus(meta.seconds, answer.seconds),
+            "input_tokens": _plus(meta.input_tokens, answer.input_tokens),
+            "output_tokens": _plus(meta.output_tokens, answer.output_tokens),
+            "slot_wait_seconds": round((meta.slot_wait_seconds or 0) + answer.slot_wait_seconds, 2),
+        }
     )
 
 
@@ -102,16 +106,22 @@ class KlRecognitionService:
 
     async def recognize(self, request: KlRecognizeRequest) -> KlRecognitionResult:
         source = str(request.flat_guid or request.pdf_url)
-        meta = KlRecognitionMeta(model=self._model)
+        meta = KlRecognitionMeta(model=self._model, worker_pid=os.getpid())
         try:
+            started = time.monotonic()
             pdf = await self._sheet_client.download(
                 flat_guid=str(request.flat_guid) if request.flat_guid else None,
                 pdf_url=str(request.pdf_url) if request.pdf_url else None,
             )
+            meta.sheet_seconds = round(time.monotonic() - started, 2)
             # Cropping is CPU-bound and takes hundreds of MB per page (18 line maps): run it off
             # the event loop and only a couple at a time, or a burst of requests runs out of memory.
+            started = time.monotonic()
             async with _image_slots():
+                meta.image_wait_seconds = round(time.monotonic() - started, 2)
+                started = time.monotonic()
                 images = await asyncio.to_thread(self._build_images, pdf)
+                meta.image_seconds = round(time.monotonic() - started, 2)
         except (KlSheetNotFoundError, KlSheetDownloadError, PlanPageMissingError) as exc:
             logger.info("KL {source}: {reason}", source=source, reason=exc)
             return not_recognized_result(str(exc), request.bi_area, meta)

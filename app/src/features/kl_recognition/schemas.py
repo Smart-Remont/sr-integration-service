@@ -96,6 +96,17 @@ class KlRecognitionMeta(BaseSchema):
     seconds: int | None = Field(default=None, description="Время работы агента.")
     input_tokens: int | None = None
     output_tokens: int | None = None
+    sheet_seconds: float | None = Field(
+        default=None, description="Скачивание листа (BI или `pdf_url`)."
+    )
+    image_wait_seconds: float | None = Field(
+        default=None, description="Ожидание свободного места на нарезку плана."
+    )
+    image_seconds: float | None = Field(default=None, description="Нарезка плана.")
+    slot_wait_seconds: float | None = Field(
+        default=None, description="Ожидание свободного места у Composer, по всем вызовам."
+    )
+    worker_pid: int | None = Field(default=None, description="Процесс сервиса, который вёл запрос.")
 
 
 class KlRecognitionResult(BaseSchema):

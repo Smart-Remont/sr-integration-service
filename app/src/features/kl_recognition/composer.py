@@ -26,6 +26,7 @@ class ComposerAnswer:
     seconds: int
     input_tokens: int | None
     output_tokens: int | None
+    slot_wait_seconds: float = 0.0
 
 
 _slots: dict[int, asyncio.Semaphore] = {}
@@ -67,8 +68,10 @@ class ComposerClient:
         raise AssertionError("unreachable")
 
     async def _read_once(self, task: bytes) -> ComposerAnswer:
+        queued = time.monotonic()
         async with _parallel_slots(self._config.max_parallel):
             started = time.monotonic()
+            slot_wait = started - queued
             stdout = await self._run_helper(task)
             seconds = round(time.monotonic() - started)
 
@@ -84,6 +87,7 @@ class ComposerClient:
             seconds=seconds,
             input_tokens=usage.get("inputTokens"),
             output_tokens=usage.get("outputTokens"),
+            slot_wait_seconds=round(slot_wait, 2),
         )
 
     async def _run_helper(self, task: bytes) -> bytes:
