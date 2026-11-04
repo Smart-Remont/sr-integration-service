@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru" prefix="og: //ogp.me/ns#">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>SmartRemont</title>
+    <link rel="shortcut icon" href="/design/img/favicon.ico" type="image/x-icon">
+    <link href="/cabinet/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/cabinet/fonts/icomoon/style.css">
+    <link rel="stylesheet" href="/cabinet/fonts/fa/css/font-awesome.min.css">
+    <link rel="stylesheet" href="/cabinet/js/scroll/jquery.scrollbar.css">
+    <link rel="stylesheet" href="/design/js/colorbox/colorbox.css?v=3">
+    <link rel="stylesheet" href="/cabinet/css/style.css?v=17">
+    <link rel="stylesheet" href="/cabinet/lightbox/simplelightbox.min.css?v=2">
+    <link rel="stylesheet" href="/cabinet/flatpickr/flatpickr.min.css">
+    <link rel="stylesheet" href="/cabinet/flatpickr/material_blue.css">
+    <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+    <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
+    <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <!-- Include all compiled plugins (below), or include individual files as needed -->
+    <script src="/cabinet/js/bootstrap.min.js"></script>
+    <script src="/cabinet/js/scroll/jquery.scrollbar.min.js"></script>
+    <script src="/cabinet/js/autosize.min.js"></script>
+    <script src="/cabinet/js/clamp.min.js"></script>
+    <script src="/cabinet/js/main.js?v=7"></script>
+    <script src="/design/js/colorbox/jquery.colorbox-min.js"></script>
+    <script src="/js/simple-lightbox.min.js?v=2"></script>
+    <script src="/version_2.0/ace_admin/assets/js/ace-elements.min.js"></script>
+    <script src="/version_2.0/ace_admin/assets/js/ace.min.js"></script>
+    <script src="/cabinet/flatpickr/flatpickr.js"></script>
+    <script src="/cabinet/flatpickr/ru.min.js"></script>
+    <script src="/cabinet/flatpickr/moment-with-locales.min.js"></script>
+    <script src="/cabinet/js/jquery.validate.js"></script>
+    <style>
+        .list-group-item:first-child {
+            border-top-left-radius: 0px;
+            border-top-right-radius: 0px;
+            border-top: none;
+        }
+    </style>
+</head>
+<body class="bg-grey">
+<div id="notifies" class="notifies"></div>
+<div class="container" style="margin-top: 20px;">
+    <div class="alert alert-warning" style="position: sticky; top: 0; z-index: 1;">
+        <strong>Внимание!</strong>
+        <p>Настоятельно рекомендуем скачать и ознакомиться с документом который подписываете!</p>
+    </div>
+    <div class="jumbotron site-rules">
+                <div>
+            <!-- Nav tabs -->
+            <ul class="nav nav-tabs" role="tablist">
+                <li role="presentation" class="active"><a href="#active_signs" aria-controls="active_signs" role="tab" data-toggle="tab">Активные подписи</a></li>
+                <li role="presentation"><a href="#deleted_signs" aria-controls="deleted_signs" role="tab" data-toggle="tab">Отозванные подписи</a></li>
+            </ul>
+
+            <!-- Tab panes -->
+            <div class="tab-content">
+                <div role="tabpanel" class="tab-pane active" id="active_signs">
+                    <div class="list-group">
+                                            </div>
+                </div>
+                <div role="tabpanel" class="tab-pane" id="deleted_signs">
+                    <div class="list-group">
+                                            </div>
+                </div>
+            </div>
+            <hr>
+            <p class="small">Клиент: </p>
+            <p>Телефон: </p>
+            <p>ЖК: </p>
+            <p>Планировка: <a href="" target="_blank"></a></p>
+            <p>Email: </p>
+            <p>Город: </p>
+        </div>
+    </div>
+</div>
+<div id="modal-container" class="modal fade" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header no-padding">
+                <div class="table-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">
+                        <span class="white">&times;</span>
+                    </button>
+                    <span id="modal-header-container"></span>
+                </div>
+            </div>
+            <div id="modal-body-container"></div>
+        </div>
+    </div>
+</div>
+<script>
+    $(document).ready(function(){
+    });
+
+    function view_doc(ob) {
+        $('#modal-container').find('.modal-dialog').addClass('modal-md');
+        $('#modal-container').addClass('doc_modal');
+        $("#modal-header-container").empty();
+        $("#modal-body-container").empty();
+        $('#modal-header-container').append('Просмотр документа');
+        $('<iframe>', {
+            src: $(ob).closest('.list-group-item').find('input.view_link').val(),
+            id:  'myFrame',
+            frameborder: 0,
+            scrolling: 'no',
+            width: "100%",
+            height: "80vh",
+        }).appendTo('#modal-body-container');
+
+        $("#modal-container").filter('.modal').modal();
+    }
+
+    //function showSignForm(client_request_document_id, document_url){
+    //    //alert(client_request_document_id);
+    //    $('#modal-container').find('.modal-dialog').addClass('modal-md');
+    //    $('#modal-container').addClass('sign_modal');
+    //
+    //    $('.sign_modal').on('hidden.bs.modal', function () {
+    //        location.reload();
+    //    });
+    //
+    //    $("#modal-header-container").empty();
+    //    $("#modal-body-container").empty();
+    //    $('#modal-header-container').append('Подпись документа №' + client_request_document_id);
+    //    $.ajax({
+    //        type: 'POST',
+    //        url: "/client/sign-form/",
+    //        data: {client_request_document_id: client_request_document_id, document_url: document_url, hash: '//'},
+    //        async: true,
+    //        success: function(data){
+    //            $("#modal-body-container").html(data);
+    //        }
+    //    });
+    //    $("#modal-container").filter('.modal').modal();
+    //}
+    function showClientSignForm(sign_mode, uuid){
+        //alert(client_request_document_id);
+        $('#modal-container').find('.modal-dialog').addClass('modal-md');
+        $('#modal-container').addClass('sign_modal');
+
+        $('.sign_modal').on('hidden.bs.modal', function () {
+            location.reload();
+        });
+
+        $("#modal-header-container").empty();
+        $("#modal-body-container").empty();
+        $('#modal-header-container').append('Подписать документ');
+        $.ajax({
+            type: 'POST',
+            url: "/client/client-sign-form/",
+            data: {
+                uuid: uuid,
+                sign_mode: sign_mode
+            },
+            async: true,
+            success: function(data){
+                $("#modal-body-container").html(data);
+            }
+        });
+        $("#modal-container").filter('.modal').modal();
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Bytes of production pages: line ends are part of the comparison with PHP.
+app/tests/client_sign/golden/* -text
+app/src/features/client_sign/templates/* -text
