@@ -12,6 +12,7 @@ from .room_mapping import (
     is_kitchen_studio,
     is_terrace,
     merge_open_storage,
+    note_guessed_studio,
     note_kitchen_without_living_room,
     room_type,
     system_rooms,
@@ -173,6 +174,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
     terraces = [room for room in read if is_terrace(room.name)]
     read = merge_open_storage([room for room in read if not is_terrace(room.name)], doubts)
     note_kitchen_without_living_room(read, doubts)
+    note_guessed_studio(read, doubts)
     studio = is_kitchen_studio(read)
     targets = system_rooms([room.kind for room in read], [room.area for room in read])
     return (
@@ -256,9 +258,9 @@ def build_result(
     return KlRecognitionResult(
         status=status,
         reason=reason,
-        # Unrecognised sheets carry no rooms: the planirovka is entered by hand, and half-read
-        # rooms must not be mistaken for a result. Sums and doubts still explain what failed.
-        rooms=rooms if status is RecognitionStatus.RECOGNIZED else [],
+        # Unrecognised sheets carry what was read too: the operator checks it against the sheet
+        # instead of typing every room. The status, sums and doubts say it is not a result.
+        rooms=rooms,
         is_kitchen_studio=studio if status is RecognitionStatus.RECOGNIZED else False,
         terraces=[KlRoomPart(name=t.name, area=t.area) for t in terraces]
         if status is RecognitionStatus.RECOGNIZED

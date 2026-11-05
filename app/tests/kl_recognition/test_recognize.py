@@ -152,7 +152,7 @@ async def test_not_recognized_when_sum_differs_from_bi(client: AsyncClient) -> N
     assert result["status"] == "not_recognized"
     assert result["checks"]["bi_ok"] is False
     # half-read rooms are not handed over: the planirovka is entered by hand
-    assert result["rooms"] == []
+    assert result["rooms"]  # прочитанное отдаём: оператор сверяет его с листом
 
 
 async def test_agent_verdict_is_not_trusted(client: AsyncClient, composer: AsyncMock) -> None:
@@ -180,7 +180,7 @@ async def test_room_of_unknown_type_is_not_recognized(
     result = await recognize(client)
     assert result["status"] == "not_recognized"
     assert "не определён тип или полная площадь помещения: Сауна" in result["reason"]
-    assert result["rooms"] == []
+    assert result["rooms"]  # прочитанное отдаём: оператор сверяет его с листом
 
 
 async def test_free_layout_is_not_recognised(client: AsyncClient, composer: AsyncMock) -> None:
@@ -546,15 +546,33 @@ async def test_kitchen_niche_is_a_studio_with_areas_kept_apart(
     assert [room["area"] for room in result["rooms"]] == [7.93, 15.26]
 
 
-async def test_plain_kitchen_is_a_studio_only_when_open_to_the_living_room(
+async def test_plain_kitchen_seen_as_open_is_a_doubt_not_a_studio(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # кв. 237: на листе сплошная стена, а модель отметила кухню открытой
+    open_to = {"name": "Гостиная", "area": 15.26}
+    kitchen = {"name": "Кухня", "area": 6.29}
+    opened = await recognize_rooms(
+        client, composer, kitchen_rooms({**kitchen, "openTo": open_to}, LIVING)
+    )
+    assert opened["status"] == "recognized"
+    assert opened["is_kitchen_studio"] is False
+    assert any("открыта в гостиную" in doubt for doubt in opened["doubts"])
+    walled = await recognize_rooms(
+        client, composer, kitchen_rooms({**kitchen, "openTo": None}, LIVING)
+    )
+    assert walled["is_kitchen_studio"] is False
+    assert not any("открыта в гостиную" in doubt for doubt in walled["doubts"])
+
+
+async def test_labelled_niche_does_not_need_a_doubt(
     client: AsyncClient, composer: AsyncMock
 ) -> None:
     open_to = {"name": "Гостиная", "area": 15.26}
-    kitchen = {"name": "Кухня", "area": 6.29}
-    opened = kitchen_rooms({**kitchen, "openTo": open_to}, LIVING)
-    assert (await recognize_rooms(client, composer, opened))["is_kitchen_studio"] is True
-    walled = kitchen_rooms({**kitchen, "openTo": None}, LIVING)
-    assert (await recognize_rooms(client, composer, walled))["is_kitchen_studio"] is False
+    niche = {"name": "Кухня-ниша", "area": 6.59, "openTo": open_to}
+    result = await recognize_rooms(client, composer, kitchen_rooms(niche, LIVING))
+    assert result["is_kitchen_studio"] is True
+    assert not any("открыта в гостиную" in doubt for doubt in result["doubts"])
 
 
 async def test_wardrobe_niche_does_not_make_a_studio(
@@ -578,3 +596,86 @@ async def test_kitchen_without_living_room_is_noted_and_not_a_studio(
     result = await recognize_rooms(client, composer, kitchen_rooms({"name": name, "area": 18.7}))
     assert result["is_kitchen_studio"] is False
     assert any("гостиной на листе нет" in doubt for doubt in result["doubts"])
+
+
+# Случаи SHABYT 1 (бой, 04.11.2026): лист и ответ модели как на самом деле.
+def shabyt_room(name: str, area: float, kind: str | None = None) -> dict[str, Any]:
+    return {"name": name, "type": kind or name, "area": area, "financialArea": area}
+
+
+SHABYT_291 = [
+    shabyt_room("Гостиная", 15.39, "Гостinая"),
+    shabyt_room("Кухня-ниша", 6.59, "Кухня"),
+    shabyt_room("Прихожая", 8.66),
+    shabyt_room("Ванная", 4.41),
+    shabyt_room("Спальня", 14.49),
+    {"name": "Лоджия", "type": "Балкон", "area": 3.02, "financialArea": 1.51},
+]
+
+
+@pytest.mark.parametrize("name", ["Гостиная", "Гостinая"])
+async def test_living_room_with_latin_letters_in_the_type_is_recognized(
+    client: AsyncClient, composer: AsyncMock, name: str
+) -> None:
+    # кв. 291: тип «Гостinая» не понят — «гостиной нет» и совет делить кухню
+    rooms = [{**SHABYT_291[0], "name": name}, *SHABYT_291[1:]]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": 51.05})
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 51.05})
+    assert result["status"] == "recognized"
+    assert result["is_kitchen_studio"] is True
+    assert {r["room_type"] for r in result["rooms"]} >= {"Гостиная", "Кухня"}
+    assert not any("гостиной на листе нет" in d or "не из списка" in d for d in result["doubts"])
+
+
+async def test_sheet_without_a_niche_label_keeps_what_was_read(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # кв. 11: на листе нет «Кухня-ниша 6», сумма меньше ровно на 6,00
+    rooms = [
+        shabyt_room("Гостиная", 12.85),
+        shabyt_room("Спальня", 12.47),
+        shabyt_room("Спальня", 19.04),
+        shabyt_room("Прихожая", 12.39),
+        shabyt_room("Ванная", 4.7),
+        {"name": "Лоджия", "type": "Балкон", "area": 2.88, "financialArea": 1.44},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": 68.89})
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 68.89})
+    assert result["status"] == "not_recognized"
+    assert result["checks"]["rooms_sum"] == 62.89
+    assert "Гостиная" in {r["room_type"] for r in result["rooms"]}
+
+
+async def test_niche_with_a_label_is_two_rooms_and_a_studio(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # кв. 16: тот же план, что у кв. 11, но подпись есть
+    rooms = [
+        shabyt_room("Гостиная", 12.85),
+        shabyt_room("Кухня-ниша", 6.0, "Кухня"),
+        shabyt_room("Спальня", 12.47),
+        shabyt_room("Спальня", 19.04),
+        shabyt_room("Прихожая", 12.39),
+        shabyt_room("Ванная", 4.7),
+        {"name": "Лоджия", "type": "Балкон", "area": 2.88, "financialArea": 1.44},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": 68.89})
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 68.89})
+    assert result["status"] == "recognized"
+    assert result["is_kitchen_studio"] is True
+    assert len([r for r in result["rooms"] if r["room_type"] in ("Гостиная", "Кухня")]) == 2
+
+
+async def test_kitchen_without_living_room_note_does_not_insist_on_splitting(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # кв. 115: «Спальня 21,16» с диваном, кухня со стенами — делить нечего
+    rooms = [
+        shabyt_room("Спальня", 21.16),
+        shabyt_room("Кухня", 15.83),
+        shabyt_room("Ванная", 4.22),
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": 41.21})
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 41.21})
+    doubt = next(d for d in result["doubts"] if "гостиной на листе нет" in d)
+    assert "какая комната" in doubt
