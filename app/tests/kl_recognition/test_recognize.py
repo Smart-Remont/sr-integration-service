@@ -369,6 +369,18 @@ async def test_loggia_with_one_printed_area_is_not_recognized(
     assert "Лоджия" in result["reason"]
 
 
+@pytest.mark.parametrize(("total", "status"), [(46.58, "recognized"), (46.57, "not_recognized")])
+async def test_sum_at_the_tolerance_is_recognized(
+    client: AsyncClient, composer: AsyncMock, total: float, status: str
+) -> None:
+    # Bayterak, кв. 54 и 60: 46,61 против 46,58 в дробных числах чуть больше 0,03
+    living = {"name": "Гостиная", "type": "Гостиная", "area": 33.88, "financialArea": 33.88}
+    rooms = [*ROOMS[:2], living]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, checks={"sheetTotal": total})
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+    assert result["status"] == status
+
+
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
     rooms = [*ROOMS[:2], {"name": "Гостиная", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
     composer.read_plan.return_value = composer_answer(rooms=rooms)

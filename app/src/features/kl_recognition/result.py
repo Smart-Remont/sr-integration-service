@@ -206,6 +206,11 @@ def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
     return None
 
 
+def _sums_match(rooms_sum: float, total: float) -> bool:
+    # Rounded: 46.61 - 46.58 is 0.030000000000001 in floats and must still pass.
+    return round(abs(rooms_sum - total), 2) <= SUM_TOLERANCE
+
+
 def build_result(
     answer: dict[str, Any], bi_area: float | None, meta: KlRecognitionMeta
 ) -> KlRecognitionResult:
@@ -230,8 +235,8 @@ def build_result(
     rooms_sum = round(
         sum(room.financial_area for room in rooms) + sum(t.financial_area for t in terraces), 2
     )
-    sheet_ok = None if sheet_total is None else abs(rooms_sum - sheet_total) <= SUM_TOLERANCE
-    bi_ok = None if bi_area is None else abs(rooms_sum - bi_area) <= SUM_TOLERANCE
+    sheet_ok = None if sheet_total is None else _sums_match(rooms_sum, sheet_total)
+    bi_ok = None if bi_area is None else _sums_match(rooms_sum, bi_area)
     unnamed = any(room.name.lower().startswith("не определ") for room in rooms)
     unmapped = _unmapped_reason(rooms)
 
