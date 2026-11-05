@@ -370,11 +370,11 @@ async def test_loggia_with_one_printed_area_is_not_recognized(
 
 
 async def test_type_outside_the_list_is_reported(client: AsyncClient, composer: AsyncMock) -> None:
-    rooms = [*ROOMS[:2], {"name": "Зал", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
+    rooms = [*ROOMS[:2], {"name": "Гостиная", "type": "Зал", "area": 20.85, "financialArea": 20.85}]
     composer.read_plan.return_value = composer_answer(rooms=rooms)
     result = await recognize(client)
     assert result["status"] == "not_recognized"
-    assert "тип «Зал» у «Зал» не из списка" in result["doubts"]
+    assert "тип «Зал» у «Гостиная» не из списка" in result["doubts"]
 
 
 async def test_room_layout_comes_with_system_rooms(
@@ -625,16 +625,6 @@ async def test_living_room_with_latin_letters_in_the_type_is_recognized(
     assert result["is_kitchen_studio"] is True
     assert {r["room_type"] for r in result["rooms"]} >= {"Гостиная", "Кухня"}
     assert not any("гостиной на листе нет" in d or "не из списка" in d for d in result["doubts"])
-
-
-async def test_type_is_taken_only_from_an_exact_name(
-    client: AsyncClient, composer: AsyncMock
-) -> None:
-    rooms = [shabyt_room("Кухня-ниша", 6.59, "что-то"), *ROOMS[1:]]
-    composer.read_plan.return_value = composer_answer(rooms=rooms)
-    result = await recognize(client)
-    assert result["status"] == "not_recognized"
-    assert any("не из списка" in doubt for doubt in result["doubts"])
 
 
 async def test_sheet_without_a_niche_label_keeps_what_was_read(

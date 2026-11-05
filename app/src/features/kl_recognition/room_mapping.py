@@ -206,11 +206,6 @@ def room_type(value: object) -> RoomType | None:
     return _BY_NAME[close[0]] if close else None
 
 
-def room_type_by_name(name: object) -> RoomType | None:
-    """The type when the label is exactly a type name; «Кухня-ниша» or «Мастер спальня» stay unknown."""
-    return _BY_NAME.get(str(name).strip().translate(_LOOKALIKES).casefold())
-
-
 def _resolve_types(types: list[RoomType], areas: list[float]) -> list[RoomType]:
     """Hall, storage and toilet rules that look at the other rooms of the flat."""
     resolved = [STORAGE_AS if kind is RoomType.STORAGE else kind for kind in types]

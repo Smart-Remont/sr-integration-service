@@ -15,7 +15,6 @@ from .room_mapping import (
     note_guessed_studio,
     note_kitchen_without_living_room,
     room_type,
-    room_type_by_name,
     system_rooms,
 )
 from .schemas import (
@@ -138,7 +137,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
             doubts.append(f"запись комнаты без названия или площади: {raw}")
             continue
         financial = _as_float(raw.get("financialArea", raw.get("financial_area")))
-        kind = room_type(raw.get("type")) or room_type_by_name(raw["name"])
+        kind = room_type(raw.get("type"))
         if kind is None:
             doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
             kind = RoomType.OTHER
