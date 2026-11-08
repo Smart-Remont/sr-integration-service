@@ -811,3 +811,18 @@ async def test_room_type_comes_as_its_number_and_names_lose_latin_letters(
     assert result["status"] == "recognized"
     assert [room["system_name"] for room in result["rooms"]] == ["Кухня", "Балкон", "Спальня"]
     assert result["rooms"][2]["name"] == "Мастер спальня"
+
+
+async def test_whole_page_is_not_read_when_the_gap_is_a_room_without_an_area(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *LOGGIA_WITHOUT_AREAS,
+        {"name": "Лоджия", "type": 12, "areaText": None, "area": None, "financialArea": None},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, sheetTotal=40.0)
+
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 40.0})
+
+    assert result["status"] == "not_recognized"
+    assert composer.read_plan.await_count == 1
