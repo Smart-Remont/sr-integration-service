@@ -144,10 +144,8 @@ class KlRecognitionService:
         meta: KlRecognitionMeta,
     ) -> tuple[KlRecognitionResult, bool]:
         """One reading of the images; False when the agent gave no usable answer."""
-        bi_text = f"{request.bi_area:.2f}" if request.bi_area is not None else ""
-        prompt = self._prompt_template.replace("{BI_AREA}", bi_text).replace(
-            "{IMAGES}", images_text
-        )
+        # The developer's area is not shown to the agent: given a target, it fits numbers to it.
+        prompt = self._prompt_template.replace("{IMAGES}", images_text)
         try:
             answer = await self._composer.read_plan(prompt, images)
         except ComposerError as exc:

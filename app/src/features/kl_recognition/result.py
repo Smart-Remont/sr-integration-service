@@ -1,5 +1,7 @@
-"""Turns Composer's answer into the API result. The sums and the status are recomputed here:
-the agent's own arithmetic and verdict are never trusted."""
+"""Turns Composer's answer into the API result. The sums and the status are computed here: the
+agent only copies what is printed. Every area must come with the text it was copied from
+(`areaText`); an area that is not in its quote, or has none, is a problem, not a result — that is
+how a number fitted to the total (SHABYT 1, кв. 140: a loggia printed without areas) is caught."""
 
 import json
 import re
@@ -15,10 +17,13 @@ from .room_mapping import (
     note_guessed_studio,
     note_kitchen_without_living_room,
     room_type,
+    russian_name,
     system_rooms,
 )
 from .schemas import (
     KlChecks,
+    KlProblem,
+    KlProblemCode,
     KlRecognitionMeta,
     KlRecognitionResult,
     KlRoom,
@@ -31,6 +36,14 @@ from .schemas import (
 # Sheet areas are rounded to hundredths; correctly read sheets differ from the total by 0–0.03.
 SUM_TOLERANCE = 0.03
 NEIGHBOR_SIDES = ("left", "right", "up", "down")
+# Numbers in a printed area: «2,51 (1,26)», «15.35 м2», «6».
+_QUOTE_NUMBER = re.compile(r"(?<![\d.,])(\d{1,4})(?:\s?[.,]\s?(\d{1,2}))?(?![\d])")
+
+
+def quote_numbers(text: str | None) -> list[float]:
+    """The numbers of a printed area, without the «2» of «м2» / «м²»."""
+    cleaned = re.sub(r"м\s?[2²]", " ", text or "", flags=re.IGNORECASE)
+    return [float(f"{whole}.{part or 0}") for whole, part in _QUOTE_NUMBER.findall(cleaned)]
 
 
 def first_json_object(text: str) -> dict[str, Any] | None:
@@ -67,6 +80,69 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _in_quote(value: float | None, numbers: list[float]) -> bool:
+    return value is None or any(abs(value - number) < 0.005 for number in numbers)
+
+
+def _quote_problems(read: list[ReadRoom], quotes: dict[int, str | None], sheet_total: float | None):
+    """An area must be printed in its quote. The rest of the sum is checked by the totals; this is
+    about a number the agent wrote without it being on the sheet."""
+    unbacked = [
+        room
+        for room in read
+        if room.area is not None
+        and not (
+            quote_numbers(quotes.get(id(room)))
+            and _in_quote(room.area, quote_numbers(quotes.get(id(room))))
+            and _in_quote(room.financial_area, quote_numbers(quotes.get(id(room))))
+        )
+    ]
+    problems = []
+    for room in read:
+        quote = quotes.get(id(room))
+        if room.area is None:
+            problems.append(
+                KlProblem(
+                    code=KlProblemCode.AREA_NOT_PRINTED,
+                    room=room.name,
+                    text=f"у «{room.name}» на листе не найдена площадь: введите её по листу",
+                )
+            )
+            continue
+        numbers = quote_numbers(quote)
+        if numbers and _in_quote(room.area, numbers) and _in_quote(room.financial_area, numbers):
+            continue
+        fitted = ""
+        # On a sheet read right every room closes the gap, so this only says something about
+        # the one room whose number is not on the sheet.
+        if sheet_total is not None and len(unbacked) == 1:
+            others = sum(other.financial_area or 0 for other in read if other is not room)
+            if abs(sheet_total - others - (room.financial_area or 0)) < 0.015:
+                fitted = " Число ровно закрывает разницу с общей площадью — похоже на подгонку."
+        shown = (
+            room.area
+            if room.financial_area in (None, room.area)
+            else f"{room.area} ({room.financial_area})"
+        )
+        if numbers:
+            problems.append(
+                KlProblem(
+                    code=KlProblemCode.AREA_NOT_IN_QUOTE,
+                    room=room.name,
+                    text=f"у «{room.name}» площадь {shown}, а на листе напечатано «{quote}».{fitted}",
+                )
+            )
+        else:
+            problems.append(
+                KlProblem(
+                    code=KlProblemCode.AREA_WITHOUT_QUOTE,
+                    room=room.name,
+                    text=f"у «{room.name}» площадь {shown} не подтверждена текстом с листа: сверьте.{fitted}",
+                )
+            )
+    return problems
+
+
 def _open_to(raw: Any) -> tuple[str, float] | None:
     area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
     return None if area is None else (str(raw.get("name") or "").strip(), area)
@@ -97,6 +173,10 @@ def _neighbors(
         (other, target, [(other.name, printed_areas[id(other)]), *other.merged_from])
         for other, target in zip(read, targets, strict=True)
     ] + [(terrace, None, [(terrace.name, terrace.area)]) for terrace in terraces]
+    known = [
+        (other, target, [(name, area) for name, area in parts if area is not None])
+        for other, target, parts in known
+    ]
     sides: dict[str, list[KlRoomRef]] = {}
     for side in NEIGHBOR_SIDES:
         refs: list[KlRoomRef] = []
@@ -127,30 +207,37 @@ def _neighbors(
     return KlRoomNeighbors(**sides)
 
 
-def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRoom], bool]:
+def _rooms(
+    raw_rooms: Any, doubts: list[str], sheet_total: float | None
+) -> tuple[list[KlRoom], list[ReadRoom], bool, list[KlProblem]]:
     """Rooms of the flat mapped to system rooms, terraces kept apart (they count in the
-    sheet total but are not rooms), and whether the kitchen is open to the living room."""
+    sheet total but are not rooms), whether the kitchen is open to the living room, and the
+    areas that are not backed by the sheet."""
     read = []
+    quotes: dict[int, str | None] = {}
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
-        area = _as_float(raw.get("area")) if isinstance(raw, dict) else None
-        if area is None or not str(raw.get("name") or "").strip():
-            doubts.append(f"запись комнаты без названия или площади: {raw}")
+        name = russian_name(str(raw.get("name") or "").strip()) if isinstance(raw, dict) else ""
+        if not name:
+            doubts.append(f"запись комнаты без названия: {raw}")
             continue
+        area = _as_float(raw.get("area"))
         financial = _as_float(raw.get("financialArea", raw.get("financial_area")))
         kind = room_type(raw.get("type"))
         if kind is None:
-            doubts.append(f"тип «{raw.get('type')}» у «{raw['name']}» не из списка")
+            doubts.append(f"тип «{raw.get('type')}» у «{name}» не из списка")
             kind = RoomType.OTHER
-        read.append(
-            ReadRoom(
-                name=str(raw["name"]).strip(),
-                area=area,
-                financial_area=financial or area,
-                kind=kind,
-                open_to=_open_to(raw.get("openTo")),
-                neighbors=_raw_neighbors(raw.get("neighbors")),
-            )
+        room = ReadRoom(
+            name=name,
+            area=area,
+            financial_area=(financial or area) if area is not None else None,
+            kind=kind,
+            open_to=_open_to(raw.get("openTo")),
+            neighbors=_raw_neighbors(raw.get("neighbors")),
         )
+        quote = raw.get("areaText", raw.get("area_text"))
+        quotes[id(room)] = str(quote).strip() if quote not in (None, "") else None
+        read.append(room)
+    problems = _quote_problems(read, quotes, sheet_total)
 
     # Neighbours point at the areas the agent read, which the rules below may change.
     printed_areas = {id(room): room.area for room in read}
@@ -158,6 +245,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
         if (
             room.kind is RoomType.BALCONY
             and not is_terrace(room.name)
+            and room.area is not None
             and room.area == room.financial_area
         ):
             full = full_balcony_area(room.name, room.area)
@@ -171,18 +259,20 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
                     f"у «{room.name}» на листе одна площадь {room.area}: полная {full} = {room.area} / 0,3"
                 )
                 room.area = full
-    terraces = [room for room in read if is_terrace(room.name)]
-    read = merge_open_storage([room for room in read if not is_terrace(room.name)], doubts)
+    # A terrace without a printed area stays a room: its problem is already reported.
+    terraces = [room for room in read if is_terrace(room.name) and room.area is not None]
+    read = merge_open_storage([room for room in read if room not in terraces], doubts)
     note_kitchen_without_living_room(read, doubts)
     note_guessed_studio(read, doubts)
     studio = is_kitchen_studio(read)
-    targets = system_rooms([room.kind for room in read], [room.area for room in read])
+    targets = system_rooms([room.kind for room in read], [room.area or 0 for room in read])
     return (
         [
             KlRoom(
                 name=room.name,
                 area=room.area,
                 financial_area=room.financial_area,
+                area_text=quotes.get(id(room)) if not room.merged_from else None,
                 room_type=room.kind,
                 room_id=target.room_id if target else None,
                 system_name=target.name if target else None,
@@ -193,6 +283,7 @@ def _rooms(raw_rooms: Any, doubts: list[str]) -> tuple[list[KlRoom], list[ReadRo
         ],
         terraces,
         studio,
+        problems,
     )
 
 
@@ -216,7 +307,16 @@ def build_result(
 ) -> KlRecognitionResult:
     doubts = [str(item) for item in answer.get("doubts") or []]
     checks_in = answer.get("checks") if isinstance(answer.get("checks"), dict) else {}
-    sheet_total = _as_float(checks_in.get("sheetTotal", answer.get("totalArea")))
+    sheet_total = _as_float(
+        answer.get("sheetTotal", checks_in.get("sheetTotal", answer.get("totalArea")))
+    )
+    total_text = answer.get("sheetTotalText")
+    if (
+        sheet_total is not None
+        and total_text
+        and not _in_quote(sheet_total, quote_numbers(str(total_text)))
+    ):
+        doubts.append(f"общая площадь {sheet_total}, а на листе напечатано «{total_text}»")
     if answer.get("freeLayout") is True:
         # Free layouts are not recognised at all: the agent stops before reading the rooms.
         return KlRecognitionResult(
@@ -230,10 +330,12 @@ def build_result(
             meta=meta,
         )
 
-    rooms, terraces, studio = _rooms(answer.get("rooms"), doubts)
+    rooms, terraces, studio, problems = _rooms(answer.get("rooms"), doubts, sheet_total)
 
     rooms_sum = round(
-        sum(room.financial_area for room in rooms) + sum(t.financial_area for t in terraces), 2
+        sum(room.financial_area or 0 for room in rooms)
+        + sum(t.financial_area or 0 for t in terraces),
+        2,
     )
     sheet_ok = None if sheet_total is None else _sums_match(rooms_sum, sheet_total)
     bi_ok = None if bi_area is None else _sums_match(rooms_sum, bi_area)
@@ -248,16 +350,24 @@ def build_result(
     elif sheet_ok is None and bi_ok is None:
         status = RecognitionStatus.NOT_RECOGNIZED
         reason = f"сумма комнат {rooms_sum}: не с чем сверить"
-    elif sheet_ok is not False and bi_ok is not False and not unnamed and not unmapped:
+    elif (
+        sheet_ok is not False
+        and bi_ok is not False
+        and not unnamed
+        and not unmapped
+        and not problems
+    ):
         status = RecognitionStatus.RECOGNIZED
         reason = f"сумма комнат {rooms_sum} = лист {sheet_total} = BI {bi_area}"
     else:
         status = RecognitionStatus.NOT_RECOGNIZED
-        reason = f"сумма комнат {rooms_sum}, лист {sheet_total}, BI {bi_area}"
+        # The cause first: the sums alone read as «the sum did not match» even when it did.
+        causes = [problem.text for problem in problems]
         if unnamed:
-            reason += "; есть помещение без названия"
+            causes.append("есть помещение без названия")
         if unmapped:
-            reason += f"; {unmapped}"
+            causes.append(unmapped)
+        reason = "; ".join([*causes, f"сумма комнат {rooms_sum}, лист {sheet_total}, BI {bi_area}"])
 
     total_rooms = answer.get("totalRooms")
     return KlRecognitionResult(
@@ -280,5 +390,6 @@ def build_result(
             bi_ok=bi_ok,
         ),
         doubts=doubts,
+        problems=problems,
         meta=meta,
     )

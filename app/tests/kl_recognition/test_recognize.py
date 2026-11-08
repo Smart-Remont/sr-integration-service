@@ -34,7 +34,16 @@ ROOMS = [
 ROOMS_SUM = 33.58
 
 
+def printed(room: dict[str, Any]) -> str | None:
+    """`areaText` as a sheet prints the room's areas: «3.08 (1.54)», «11.19»."""
+    area, financial = room.get("area"), room.get("financialArea")
+    if area is None:
+        return None
+    return f"{area}" if financial in (None, area) else f"{area} ({financial})"
+
+
 def composer_answer(**overrides: Any) -> ComposerAnswer:
+    """An answer of the agent; rooms without `areaText` get the one a correct answer has."""
     body = {
         "status": "recognized",
         "rooms": ROOMS,
@@ -43,6 +52,13 @@ def composer_answer(**overrides: Any) -> ComposerAnswer:
         "checks": {"sheetTotal": ROOMS_SUM},
         "doubts": [],
     } | overrides
+    if isinstance(body.get("rooms"), list):
+        body["rooms"] = [
+            room
+            if not isinstance(room, dict) or "areaText" in room
+            else room | {"areaText": printed(room)}
+            for room in body["rooms"]
+        ]
     text = "Сверил подписи.\n```json\n" + json.dumps(body, ensure_ascii=False) + "\n```"
     return ComposerAnswer(text=text, seconds=17, input_tokens=17000, output_tokens=1500)
 
@@ -74,7 +90,7 @@ async def client(sheet_client: AsyncMock, composer: AsyncMock) -> AsyncIterator[
         composer=composer,
         build_images=lambda _pdf: [b"jpeg"] * 5,
         model="composer-2.5",
-        prompt_template="Площадь BI: `{BI_AREA}`. Картинки: {IMAGES}",
+        prompt_template="Картинки: {IMAGES}",
         build_page_images=lambda _pdf: [b"page"] * 5,
     )
     app.dependency_overrides[get_kl_recognition_service] = lambda: service
@@ -126,12 +142,14 @@ async def test_recognized_when_sum_matches_sheet_and_bi(
         "name": "Лоджия",
         "area": 3.08,
         "financial_area": 1.54,
+        "area_text": "3.08 (1.54)",
         "room_type": "Балкон",
         "room_id": 20,
         "system_name": "Балкон",
         "merged_from": [],
         "neighbors": {"left": [], "right": [], "up": [], "down": []},
     }
+    assert result["problems"] == []
     assert result["checks"] == {
         "rooms_sum": ROOMS_SUM,
         "sheet_total": ROOMS_SUM,
@@ -142,7 +160,9 @@ async def test_recognized_when_sum_matches_sheet_and_bi(
     assert result["total_rooms"] == 1
     assert result["meta"]["seconds"] == 17
     prompt, images = composer.read_plan.await_args.args
-    assert prompt.startswith(f"Площадь BI: `{ROOMS_SUM:.2f}`. Картинки: к сообщению приложены")
+    # the developer's area is never shown to the agent: it would fit numbers to it
+    assert prompt.startswith("Картинки: к сообщению приложены")
+    assert str(ROOMS_SUM) not in prompt
     assert "вырезанный со стр. 2" in prompt
     assert len(images) == 5
 
@@ -691,3 +711,103 @@ async def test_kitchen_without_living_room_note_does_not_insist_on_splitting(
     result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 41.21})
     doubt = next(d for d in result["doubts"] if "гостиной на листе нет" in d)
     assert "какая комната" in doubt
+
+
+# --- An area must be printed: a number fitted to the total is not a result (SHABYT 1, кв. 140) ---
+
+LOGGIA_WITHOUT_AREAS = [
+    {"name": "Кухня", "type": 3, "areaText": "11,19", "area": 11.19, "financialArea": 11.19},
+    {"name": "Гостиная", "type": 1, "areaText": "20,85", "area": 20.85, "financialArea": 20.85},
+]
+
+
+async def test_room_without_a_printed_area_is_kept_empty_and_not_recognized(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *LOGGIA_WITHOUT_AREAS,
+        {"name": "Лоджия", "type": 12, "areaText": None, "area": None, "financialArea": None},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, sheetTotal=ROOMS_SUM)
+
+    result = await recognize(client)
+
+    assert result["status"] == "not_recognized"
+    loggia = next(room for room in result["rooms"] if room["name"] == "Лоджия")
+    assert loggia["area"] is None and loggia["financial_area"] is None
+    assert result["problems"] == [
+        {
+            "code": "area_not_printed",
+            "room": "Лоджия",
+            "text": "у «Лоджия» на листе не найдена площадь: введите её по листу",
+        }
+    ]
+    assert result["reason"].startswith("у «Лоджия» на листе не найдена площадь")
+
+
+async def test_area_fitted_to_the_total_without_a_quote_is_a_problem(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # The sums match, but the loggia's numbers are not on the sheet: the agent computed them.
+    rooms = [
+        *LOGGIA_WITHOUT_AREAS,
+        {"name": "Лоджия", "type": 12, "areaText": None, "area": 3.08, "financialArea": 1.54},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "not_recognized"
+    assert result["checks"]["sheet_ok"] is True and result["checks"]["bi_ok"] is True
+    [problem] = result["problems"]
+    assert problem["code"] == "area_without_quote"
+    assert "похоже на подгонку" in problem["text"]
+
+
+async def test_area_that_differs_from_its_quote_is_a_problem(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *LOGGIA_WITHOUT_AREAS,
+        {"name": "Лоджия", "type": 12, "areaText": "3,01", "area": 3.08, "financialArea": 1.54},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "not_recognized"
+    [problem] = result["problems"]
+    assert problem["code"] == "area_not_in_quote"
+    assert "напечатано «3,01»" in problem["text"]
+
+
+@pytest.mark.parametrize("quote", ["3,08 (1,54)", "3.08 м2 / 1.54 м²", "3,08х0,5=1,54"])
+async def test_quotes_are_read_in_the_ways_sheets_print_them(
+    client: AsyncClient, composer: AsyncMock, quote: str
+) -> None:
+    rooms = [
+        *LOGGIA_WITHOUT_AREAS,
+        {"name": "Лоджия", "type": 12, "areaText": quote, "area": 3.08, "financialArea": 1.54},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "recognized", result["problems"]
+
+
+async def test_room_type_comes_as_its_number_and_names_lose_latin_letters(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        {"name": "Кухня", "type": "3", "area": 11.19, "financialArea": 11.19},
+        {"name": "Лоджия", "type": 12, "area": 3.08, "financialArea": 1.54},
+        {"name": "Мастер spальня", "type": 2, "area": 20.85, "financialArea": 20.85},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "recognized"
+    assert [room["system_name"] for room in result["rooms"]] == ["Кухня", "Балкон", "Спальня"]
+    assert result["rooms"][2]["name"] == "Мастер спальня"
