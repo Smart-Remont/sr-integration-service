@@ -240,7 +240,15 @@ def _rooms(
         quote = raw.get("areaText", raw.get("area_text"))
         quotes[id(room)] = str(quote).strip() if quote not in (None, "") else None
         read.append(room)
-    problems = _quote_problems(read, quotes, sheet_total)
+    # Terraces are not rooms of a planirovka (their area is the flat's, from 1C): no area problems for them;
+    # one printed without an area is only noted, it never becomes a room.
+    for room in read:
+        if is_terrace(room.name) and room.area is None:
+            doubts.append(f"у «{room.name}» на листе нет площади")
+    read = [room for room in read if not (is_terrace(room.name) and room.area is None)]
+    problems = _quote_problems(
+        [room for room in read if not is_terrace(room.name)], quotes, sheet_total
+    )
 
     # Neighbours point at the areas the agent read, which the rules below may change.
     printed_areas = {id(room): room.area for room in read}
@@ -262,8 +270,7 @@ def _rooms(
                     f"у «{room.name}» на листе одна площадь {room.area}: полная {full} = {room.area} / 0,3"
                 )
                 room.area = full
-    # A terrace without a printed area stays a room: its problem is already reported.
-    terraces = [room for room in read if is_terrace(room.name) and room.area is not None]
+    terraces = [room for room in read if is_terrace(room.name)]
     read = merge_open_storage([room for room in read if room not in terraces], doubts)
     note_kitchen_without_living_room(read, doubts)
     note_guessed_studio(read, doubts)

@@ -836,3 +836,20 @@ def test_m2_in_a_quote_is_not_a_number() -> None:
 
     assert quote_numbers("15.35m2") == [15.35]
     assert quote_numbers("15,35 м²") == [15.35]
+
+
+async def test_terrace_without_an_area_is_never_a_room(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *ROOMS,
+        {"name": "Терраса", "type": 12, "areaText": None, "area": None, "financialArea": None},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "recognized"
+    assert all(room["name"] != "Терраса" for room in result["rooms"])
+    assert result["problems"] == []
+    assert "у «Терраса» на листе нет площади" in result["doubts"]
