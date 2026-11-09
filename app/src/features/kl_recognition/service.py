@@ -9,6 +9,7 @@ from .composer import ComposerAnswer, ComposerClient, ComposerError
 from .plan_images import PlanPageMissingError, build_page_images
 from .result import build_result, first_json_object, not_recognized_result
 from .schemas import (
+    KlProblemCode,
     KlRecognitionMeta,
     KlRecognitionResult,
     KlRecognizeRequest,
@@ -58,6 +59,10 @@ def _add(meta: KlRecognitionMeta, answer: ComposerAnswer) -> KlRecognitionMeta:
 
 def _cut_plan_failed(result: KlRecognitionResult, bi_area: float | None) -> bool:
     if result.status is not RecognitionStatus.NOT_RECOGNIZED:
+        return False
+    # The gap is a room printed without an area: the cut is fine, and a second reading only
+    # gives the agent a chance to make the number up (SHABYT 1, кв. 200: «1.5» for the loggia).
+    if any(problem.code is KlProblemCode.AREA_NOT_PRINTED for problem in result.problems):
         return False
     rooms_sum = result.checks.rooms_sum
     target = result.checks.sheet_total if result.checks.sheet_total is not None else bi_area
@@ -144,10 +149,8 @@ class KlRecognitionService:
         meta: KlRecognitionMeta,
     ) -> tuple[KlRecognitionResult, bool]:
         """One reading of the images; False when the agent gave no usable answer."""
-        bi_text = f"{request.bi_area:.2f}" if request.bi_area is not None else ""
-        prompt = self._prompt_template.replace("{BI_AREA}", bi_text).replace(
-            "{IMAGES}", images_text
-        )
+        # The developer's area is not shown to the agent: given a target, it fits numbers to it.
+        prompt = self._prompt_template.replace("{IMAGES}", images_text)
         try:
             answer = await self._composer.read_plan(prompt, images)
         except ComposerError as exc:

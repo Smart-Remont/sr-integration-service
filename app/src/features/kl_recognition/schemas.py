@@ -57,9 +57,15 @@ class KlRoomNeighbors(BaseSchema):
 
 class KlRoom(BaseSchema):
     name: str = Field(description="Название, как напечатано на листе (`С/у`, `Гард.`, …).")
-    area: float = Field(description="Площадь, м²; у лоджий и балконов — полная.")
-    financial_area: float = Field(
+    area: float | None = Field(
+        description="Площадь, м²; у лоджий и балконов — полная. null — на листе у помещения нет площади."
+    )
+    financial_area: float | None = Field(
         description="Площадь в общей сумме: у лоджий, балконов, террас — с коэффициентом, у остальных = area."
+    )
+    area_text: str | None = Field(
+        default=None,
+        description="Площадь дословно, как напечатана на листе (`2,51 (1,26)`); null — не напечатана.",
     )
     room_type: str = Field(
         description="Тип помещения по ответу агента: `Спальня`, `Холл`, `Кладовая`, … или `Другое`."
@@ -81,6 +87,30 @@ class KlRoom(BaseSchema):
             "стены: `left` и `right` сверху вниз, `up` и `down` слева направо."
         ),
     )
+
+
+class KlProblemCode(StrEnum):
+    AREA_NOT_PRINTED = "area_not_printed"
+    AREA_NOT_IN_QUOTE = "area_not_in_quote"
+    AREA_WITHOUT_QUOTE = "area_without_quote"
+
+
+class KlProblem(BaseSchema):
+    """Почему лист нельзя заполнять автоматически, по комнате. Сайт показывает это красным."""
+
+    code: KlProblemCode = Field(
+        description=(
+            "`area_not_printed` — у помещения на листе нет площади; `area_not_in_quote` — число в ответе "
+            "не совпадает с напечатанным; `area_without_quote` — модель не показала, где на листе это число."
+        )
+    )
+    room: str | None = Field(default=None, description="Название помещения, как на листе.")
+    area: float | None = Field(
+        default=None,
+        description="Площадь помещения, как её прочитала модель; null — не напечатана. По ней сайт понимает, "
+        "какую из одноимённых комнат поправил человек.",
+    )
+    text: str = Field(description="Причина для человека.")
 
 
 class KlChecks(BaseSchema):
@@ -124,4 +154,8 @@ class KlRecognitionResult(BaseSchema):
     total_rooms: int | None = Field(description="Комнатность из кружка у общей площади.")
     checks: KlChecks
     doubts: list[str] = Field(description="Что агент счёл сомнительным.")
+    problems: list[KlProblem] = Field(
+        default_factory=list,
+        description="Ошибки чтения, из-за которых лист не распознан: число не с листа, площади нет.",
+    )
     meta: KlRecognitionMeta

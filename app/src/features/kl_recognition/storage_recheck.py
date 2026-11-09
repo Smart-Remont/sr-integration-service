@@ -47,14 +47,19 @@ def storages_to_recheck(answer: dict[str, Any]) -> list[dict]:
     result = []
     for room in rooms:
         targets = MERGE_TARGETS.get(room_type(room.get("type")) or RoomType.OTHER)
-        if targets and _neighbour_type(rooms, room.get("openTo")) not in targets:
+        if (
+            targets
+            and _area(room.get("area")) is not None
+            and _neighbour_type(rooms, room.get("openTo")) not in targets
+        ):
             result.append(room)
     return result
 
 
 def recheck_prompt(template: str, answer: dict[str, Any], storages: list[dict]) -> str:
     listed = "\n".join(
-        f"- {r.get('name')} {r.get('area')} ({r.get('type')})" for r in _rooms(answer)
+        f"- {r.get('name')} {r.get('area')} ({(room_type(r.get('type')) or RoomType.OTHER).value})"
+        for r in _rooms(answer)
     )
     asked = "\n".join(f"- {r.get('name')} {r.get('area')}" for r in storages)
     return template.replace("{ROOMS}", listed).replace("{STORAGES}", asked)

@@ -6,6 +6,7 @@ that depend on several rooms and the numbering are here, the same as in
 `flat_image__create_flat_image_room`: the model swaps close areas when it numbers itself.
 """
 
+import re
 from dataclasses import dataclass, field
 from difflib import get_close_matches
 from enum import StrEnum
@@ -102,8 +103,9 @@ class SystemRoom:
 @dataclass
 class ReadRoom:
     name: str
-    area: float
-    financial_area: float
+    # None: the sheet prints no area for this room (the agent must not compute one).
+    area: float | None
+    financial_area: float | None
     kind: RoomType
     # The neighbour (name, area) the agent says this room is open to across a dashed line.
     open_to: tuple[str, float] | None = None
@@ -118,17 +120,25 @@ def merge_open_storage(rooms: list[ReadRoom], doubts: list[str]) -> list[ReadRoo
     absorbed: set[int] = set()
     for i, room in enumerate(rooms):
         targets = MERGE_TARGETS.get(room.kind)
-        if not targets or room.open_to is None:
+        if not targets or room.open_to is None or room.area is None:
             continue
         name, area = room.open_to
         candidates = [
             j
             for j, other in enumerate(rooms)
-            if j != i and j not in absorbed and abs(original_areas[j] - area) < 0.005
+            if j != i
+            and j not in absorbed
+            and original_areas[j] is not None
+            and abs(original_areas[j] - area) < 0.005
         ]
         if len(candidates) > 1:
             candidates = [j for j in candidates if rooms[j].name == name] or candidates
-        if len(candidates) != 1 or rooms[candidates[0]].kind not in targets:
+        if (
+            len(candidates) != 1
+            or rooms[candidates[0]].kind not in targets
+            or rooms[candidates[0]].financial_area is None
+            or room.financial_area is None
+        ):
             doubts.append(f"«{room.name}» {room.area} за пунктиром у «{name}» {area} не объединён")
             continue
         parent = rooms[candidates[0]]
@@ -169,7 +179,9 @@ def note_guessed_studio(rooms: list[ReadRoom], doubts: list[str]) -> None:
     for room in rooms:
         if room.kind is not RoomType.KITCHEN or _labelled_open(room) or not room.open_to:
             continue
-        if any(abs(other.area - room.open_to[1]) < 0.005 for other in living):
+        if any(
+            other.area is not None and abs(other.area - room.open_to[1]) < 0.005 for other in living
+        ):
             doubts.append(
                 f"«{room.name}» {room.area}: похоже, кухня открыта в гостиную, но в подписи этого нет. "
                 "Признак студии не поставлен: сверьте с листом"
@@ -188,17 +200,67 @@ def note_kitchen_without_living_room(rooms: list[ReadRoom], doubts: list[str]) -
             )
 
 
-# Latin letters models mix into Russian words: lookalikes and «Гостinая» (SHABYT 1, MERIDIAN 1).
-_LOOKALIKES = str.maketrans("aceopxykmthbinACEOPXYKMTHBIN", "асеорхукмтнвинАСЕОРХУКМТНВИН")
+# The prompt asks for the type as its number in this list: a number has no letters to mix up.
+TYPE_NUMBERS: dict[int, RoomType] = dict(enumerate(RoomType, start=1))
+
+# Latin letters models mix into Russian words. Both lookalikes («Гоcтиная») and transliteration
+# («spальня», «Мастer», «Гостinая»: SHABYT 1, Impulse, MERIDIAN 1), so one Latin letter can stand
+# for several Cyrillic ones (p: р by look, п by sound). Types come as numbers; this is for names.
+_LATIN_AS: dict[str, str] = {
+    "a": "а", "b": "бв", "c": "сц", "d": "д", "e": "еэ", "f": "ф", "g": "г", "h": "нх",
+    "i": "иі", "k": "к", "l": "л", "m": "м", "n": "нп", "o": "о", "p": "рп", "r": "рг",
+    "s": "с", "t": "т", "u": "уи", "v": "в", "x": "х", "y": "уы", "z": "з",
+}  # fmt: skip
+# Words of room labels on BI sheets (casefolded).
+ROOM_WORDS = (
+    "гостиная", "спальня", "мастер", "мастер-спальня", "детская", "гостевая", "кабинет", "кухня",
+    "кухня-ниша", "кухня-гостиная", "ниша", "столовая", "санузел", "с/у", "ванная", "душевая",
+    "прихожая", "коридор", "холл", "тамбур", "гардероб", "гардеробная", "гард.", "кладовая",
+    "клад.", "постирочная", "постир.", "лоджия", "балкон", "терраса", "игровая", "зона",
+    "с", "для", "шкафа", "кухней-нишей", "кухней", "нишей", "гостиная-столовая", "зал",
+)  # fmt: skip
+_CYRILLIC = re.compile("[а-яё]", re.IGNORECASE)
+_LATIN = re.compile("[a-z]", re.IGNORECASE)
 _BY_NAME = {kind.value.casefold(): kind for kind in RoomType}
 TYPE_MATCH_CUTOFF = 0.85
 
 
+def _fits(word: str, known: str) -> bool:
+    return len(word) == len(known) and all(
+        a == b or b in _LATIN_AS.get(a, "") for a, b in zip(word, known, strict=True)
+    )
+
+
+def _russian_word(word: str) -> str:
+    if not (_CYRILLIC.search(word) and _LATIN.search(word)):
+        return word
+    folded = word.casefold()
+    hits = [known for known in ROOM_WORDS if _fits(folded, known)]
+    if len(hits) != 1:
+        # not a label word: only the letters that cannot be anything else
+        return "".join(
+            _LATIN_AS[c.casefold()][0] if len(_LATIN_AS.get(c.casefold(), "")) == 1 else c
+            for c in word
+        )
+    return hits[0].capitalize() if word[0].isupper() else hits[0]
+
+
+def russian_name(name: str) -> str:
+    """A Russian label with stray Latin letters made Cyrillic; «WC», «TV-Зона» and the like stay."""
+    return " ".join(
+        "-".join(_russian_word(part) for part in word.split("-")) for word in name.split(" ")
+    )
+
+
 def room_type(value: object) -> RoomType | None:
-    """The type the agent gave; None when it is missing or not from the list."""
-    if value is None:
+    """The type the agent gave: its number in the list or, from older answers, the word.
+    None when it is missing or not from the list."""
+    if value is None or isinstance(value, bool):
         return None
-    key = str(value).strip().translate(_LOOKALIKES).casefold()
+    if isinstance(value, int | float) or str(value).strip().isdigit():
+        number = float(value) if isinstance(value, int | float) else int(str(value).strip())
+        return TYPE_NUMBERS.get(int(number)) if number == int(number) else None
+    key = russian_name(str(value).strip()).casefold()
     if key in _BY_NAME:
         return _BY_NAME[key]
     # one stray Latin letter («Gостиная»); a different word stays unknown
