@@ -853,3 +853,46 @@ async def test_terrace_without_an_area_is_never_a_room(
     assert all(room["name"] != "Терраса" for room in result["rooms"])
     assert result["problems"] == []
     assert "у «Терраса» на листе нет площади" in result["doubts"]
+
+
+async def test_unlabelled_zone_without_an_area_is_dropped_when_the_sum_matches(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *ROOMS,
+        {
+            "name": "Не определено",
+            "type": 13,
+            "areaText": None,
+            "area": None,
+            "financialArea": None,
+        },
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "recognized"
+    assert result["problems"] == []
+    assert all(room["name"] != "Не определено" for room in result["rooms"])
+
+
+async def test_unlabelled_zone_without_an_area_stays_when_the_sum_is_short(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *ROOMS,
+        {
+            "name": "Не определено",
+            "type": 13,
+            "areaText": None,
+            "area": None,
+            "financialArea": None,
+        },
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms, sheetTotal=40.0)
+
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": 40.0})
+
+    assert result["status"] == "not_recognized"
+    assert [problem["code"] for problem in result["problems"]] == ["area_not_printed"]

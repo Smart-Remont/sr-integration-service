@@ -307,6 +307,10 @@ def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
     return None
 
 
+def _is_unnamed(name: str) -> bool:
+    return name.lower().startswith("не определ")
+
+
 def _sums_match(rooms_sum: float, total: float) -> bool:
     # Rounded: 46.61 - 46.58 is 0.030000000000001 in floats and must still pass.
     return round(abs(rooms_sum - total), 2) <= SUM_TOLERANCE
@@ -349,7 +353,26 @@ def build_result(
     )
     sheet_ok = None if sheet_total is None else _sums_match(rooms_sum, sheet_total)
     bi_ok = None if bi_area is None else _sums_match(rooms_sum, bi_area)
-    unnamed = any(room.name.lower().startswith("не определ") for room in rooms)
+    # A zone with neither a label nor an area (the sleeping corner of a one-room flat, SHABYT 1, кв. 278)
+    # is nothing to enter when the sum already matches the sheet and BI: a note, not a room.
+    if sheet_ok is not False and bi_ok is not False and (sheet_ok or bi_ok):
+        empty = [room for room in rooms if _is_unnamed(room.name) and room.area is None]
+        if empty:
+            doubts.append(
+                f"зона без подписи и без площади не записана ({len(empty)}): "
+                f"сумма комнат сходится без неё ({rooms_sum})"
+            )
+        rooms = [room for room in rooms if room not in empty]
+        problems = [
+            problem
+            for problem in problems
+            if not (
+                problem.code is KlProblemCode.AREA_NOT_PRINTED
+                and _is_unnamed(problem.room or "")
+                and empty
+            )
+        ]
+    unnamed = any(_is_unnamed(room.name) for room in rooms)
     unmapped = _unmapped_reason(rooms)
 
     if not rooms:
