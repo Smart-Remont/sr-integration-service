@@ -739,6 +739,7 @@ async def test_room_without_a_printed_area_is_kept_empty_and_not_recognized(
         {
             "code": "area_not_printed",
             "room": "Лоджия",
+            "area": None,
             "text": "у «Лоджия» на листе не найдена площадь: введите её по листу",
         }
     ]
@@ -781,7 +782,9 @@ async def test_area_that_differs_from_its_quote_is_a_problem(
     assert "напечатано «3,01»" in problem["text"]
 
 
-@pytest.mark.parametrize("quote", ["3,08 (1,54)", "3.08 м2 / 1.54 м²", "3,08х0,5=1,54"])
+@pytest.mark.parametrize(
+    "quote", ["3,08 (1,54)", "3.08 м2 / 1.54 м²", "3,08х0,5=1,54", "3.08m2 (1.54 M2)"]
+)
 async def test_quotes_are_read_in_the_ways_sheets_print_them(
     client: AsyncClient, composer: AsyncMock, quote: str
 ) -> None:
@@ -826,3 +829,10 @@ async def test_whole_page_is_not_read_when_the_gap_is_a_room_without_an_area(
 
     assert result["status"] == "not_recognized"
     assert composer.read_plan.await_count == 1
+
+
+def test_m2_in_a_quote_is_not_a_number() -> None:
+    from src.features.kl_recognition.result import quote_numbers
+
+    assert quote_numbers("15.35m2") == [15.35]
+    assert quote_numbers("15,35 м²") == [15.35]

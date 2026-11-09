@@ -42,7 +42,7 @@ _QUOTE_NUMBER = re.compile(r"(?<![\d.,])(\d{1,4})(?:\s?[.,]\s?(\d{1,2}))?(?![\d]
 
 def quote_numbers(text: str | None) -> list[float]:
     """The numbers of a printed area, without the «2» of «м2» / «м²»."""
-    cleaned = re.sub(r"м\s?[2²]", " ", text or "", flags=re.IGNORECASE)
+    cleaned = re.sub(r"[мm]\s?[2²]", " ", text or "", flags=re.IGNORECASE)
     return [float(f"{whole}.{part or 0}") for whole, part in _QUOTE_NUMBER.findall(cleaned)]
 
 
@@ -105,6 +105,7 @@ def _quote_problems(read: list[ReadRoom], quotes: dict[int, str | None], sheet_t
                 KlProblem(
                     code=KlProblemCode.AREA_NOT_PRINTED,
                     room=room.name,
+                    area=room.area,
                     text=f"у «{room.name}» на листе не найдена площадь: введите её по листу",
                 )
             )
@@ -129,6 +130,7 @@ def _quote_problems(read: list[ReadRoom], quotes: dict[int, str | None], sheet_t
                 KlProblem(
                     code=KlProblemCode.AREA_NOT_IN_QUOTE,
                     room=room.name,
+                    area=room.area,
                     text=f"у «{room.name}» площадь {shown}, а на листе напечатано «{quote}».{fitted}",
                 )
             )
@@ -137,6 +139,7 @@ def _quote_problems(read: list[ReadRoom], quotes: dict[int, str | None], sheet_t
                 KlProblem(
                     code=KlProblemCode.AREA_WITHOUT_QUOTE,
                     room=room.name,
+                    area=room.area,
                     text=f"у «{room.name}» площадь {shown} не подтверждена текстом с листа: сверьте.{fitted}",
                 )
             )

@@ -105,6 +105,11 @@ class KlProblem(BaseSchema):
         )
     )
     room: str | None = Field(default=None, description="Название помещения, как на листе.")
+    area: float | None = Field(
+        default=None,
+        description="Площадь помещения, как её прочитала модель; null — не напечатана. По ней сайт понимает, "
+        "какую из одноимённых комнат поправил человек.",
+    )
     text: str = Field(description="Причина для человека.")
 
 
