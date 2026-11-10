@@ -896,3 +896,35 @@ async def test_unlabelled_zone_without_an_area_stays_when_the_sum_is_short(
 
     assert result["status"] == "not_recognized"
     assert [problem["code"] for problem in result["problems"]] == ["area_not_printed"]
+
+
+@pytest.mark.parametrize(("name", "kind"), [("Стир. Суш.", 11), ("Гард.", 9), ("Стир. маш.", 13)])
+async def test_labelled_zone_without_an_area_is_dropped_when_the_sum_matches(
+    client: AsyncClient, composer: AsyncMock, name: str, kind: int
+) -> None:
+    rooms = [
+        *ROOMS,
+        {"name": name, "type": kind, "areaText": None, "area": None, "financialArea": None},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "recognized"
+    assert result["problems"] == []
+    assert any(name in doubt for doubt in result["doubts"])
+
+
+async def test_loggia_without_an_area_stays_a_problem_even_when_the_sum_matches(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    rooms = [
+        *ROOMS,
+        {"name": "Лоджия", "type": 12, "areaText": None, "area": None, "financialArea": None},
+    ]
+    composer.read_plan.return_value = composer_answer(rooms=rooms)
+
+    result = await recognize(client)
+
+    assert result["status"] == "not_recognized"
+    assert [problem["room"] for problem in result["problems"]] == ["Лоджия"]

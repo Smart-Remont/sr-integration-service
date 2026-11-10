@@ -307,6 +307,10 @@ def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
     return None
 
 
+# Places that live inside another room and may be printed without an area of their own.
+ZONE_TYPES = {RoomType.WARDROBE, RoomType.STORAGE, RoomType.LAUNDRY, RoomType.OTHER}
+
+
 def _is_unnamed(name: str) -> bool:
     return name.lower().startswith("не определ")
 
@@ -353,24 +357,28 @@ def build_result(
     )
     sheet_ok = None if sheet_total is None else _sums_match(rooms_sum, sheet_total)
     bi_ok = None if bi_area is None else _sums_match(rooms_sum, bi_area)
-    # A zone with neither a label nor an area (the sleeping corner of a one-room flat, SHABYT 1, кв. 278)
-    # is nothing to enter when the sum already matches the sheet and BI: a note, not a room.
+    # A zone without its own area is nothing to enter when the sum already matches the sheet and BI: the
+    # sleeping corner of a one-room flat (no label, SHABYT 1, кв. 278) or a labelled place for a washing
+    # machine or a wardrobe inside another room («Стир. Суш.», «Гард.», Family Balance A). A loggia or a
+    # living room always has a printed area, so those stay a problem.
     if sheet_ok is not False and bi_ok is not False and (sheet_ok or bi_ok):
-        empty = [room for room in rooms if _is_unnamed(room.name) and room.area is None]
+        empty = [
+            room
+            for room in rooms
+            if room.area is None and (_is_unnamed(room.name) or room.room_type in ZONE_TYPES)
+        ]
         if empty:
             doubts.append(
-                f"зона без подписи и без площади не записана ({len(empty)}): "
-                f"сумма комнат сходится без неё ({rooms_sum})"
+                "без площади, не записаны: "
+                + ", ".join(f"«{room.name}»" for room in empty)
+                + f" — сумма комнат сходится без них ({rooms_sum})"
             )
+        dropped = {room.name for room in empty}
         rooms = [room for room in rooms if room not in empty]
         problems = [
             problem
             for problem in problems
-            if not (
-                problem.code is KlProblemCode.AREA_NOT_PRINTED
-                and _is_unnamed(problem.room or "")
-                and empty
-            )
+            if not (problem.code is KlProblemCode.AREA_NOT_PRINTED and problem.room in dropped)
         ]
     unnamed = any(_is_unnamed(room.name) for room in rooms)
     unmapped = _unmapped_reason(rooms)
