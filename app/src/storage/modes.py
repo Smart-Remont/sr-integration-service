@@ -54,6 +54,33 @@ class FileStoreMode(StrEnum):
     GUARANTEE_DOCS = "GUARANTEE_DOCS"
     ANKETA_FILES = "ANKETA_FILES"
     ANKETA_DOC_FILES = "ANKETA_DOC_FILES"
+    # Справочники и админка Office, перенесённые в My Space (office_api/office_port)
+    DS_TEMPLATE_DOC = "DS_TEMPLATE_DOC"
+    TEMPLATE_DOC = "TEMPLATE_DOC"
+    GRADE_TEMPLATE_DOC = "GRADE_TEMPLATE_DOC"
+    DOCUMENT_TEMPLATES = "DOCUMENT_TEMPLATES"
+    STANDART_DOC = "STANDART_DOC"
+    EMPLOYEE_PHOTO = "EMPLOYEE_PHOTO"
+    EMPLOYEE_PHOTO_ORIG = "EMPLOYEE_PHOTO_ORIG"
+    CMS_FRONT_WHY_WE = "CMS_FRONT_WHY_WE"
+    CMS_FRONT_CONSTRUCTOR_REMONT = "CMS_FRONT_CONSTRUCTOR_REMONT"
+    CMS_FRONT_REVIEWS = "CMS_FRONT_REVIEWS"
+    CMS_FRONT_REMONT_DETAILS_PHOTO = "CMS_FRONT_REMONT_DETAILS_PHOTO"
+    CMS_FRONT_REMONT_DETAILS_PHOTO_MINI = "CMS_FRONT_REMONT_DETAILS_PHOTO_MINI"
+    CMS_FRONT_PRESET_INFO_PHOTO = "CMS_FRONT_PRESET_INFO_PHOTO"
+    CMS_FRONT_PRESET_INFO_PHOTO_MINI = "CMS_FRONT_PRESET_INFO_PHOTO_MINI"
+    CMS_CONSTRUCTOR_DOCUMENT = "CMS_CONSTRUCTOR_DOCUMENT"
+    CMS_FRONT_BRIEF_DOC = "CMS_FRONT_BRIEF_DOC"
+    CMS_FRONT_ABOUT = "CMS_FRONT_ABOUT"
+    CMS_FRONT_PARTNER = "CMS_FRONT_PARTNER"
+    CMS_TEAM_PHOTO = "CMS_TEAM_PHOTO"
+    CMS_BEST_REMONT_RESIDENT = "CMS_BEST_REMONT_RESIDENT"
+    CMS_PRESET_MEDIA = "CMS_PRESET_MEDIA"
+    CMS_PRESET_KIT_INFO_IMG = "CMS_PRESET_KIT_INFO_IMG"
+    CMS_PRESET_KIT_INFO_IMG_MINI = "CMS_PRESET_KIT_INFO_IMG_MINI"
+    CMS_PRESET_KIT_INFO_PRESENTATION = "CMS_PRESET_KIT_INFO_PRESENTATION"
+    CMS_BANNER = "CMS_BANNER"
+    CMS_BANNER_MOBILE = "CMS_BANNER_MOBILE"
 
 
 FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
@@ -101,6 +128,32 @@ FILE_STORE_MODE_DESCRIPTIONS: dict[FileStoreMode, str] = {
     FileStoreMode.GUARANTEE_DOCS: "Гарантийные документы",
     FileStoreMode.ANKETA_FILES: "Фото работ анкеты",
     FileStoreMode.ANKETA_DOC_FILES: "Документы анкеты",
+    FileStoreMode.DS_TEMPLATE_DOC: "Шаблон ДС (Dict.php::ds_type_template__modify)",
+    FileStoreMode.TEMPLATE_DOC: "Шаблон документа (Dict.php::template__modify)",
+    FileStoreMode.GRADE_TEMPLATE_DOC: "Документ грейда (Dict.php::grade_template_upd)",
+    FileStoreMode.DOCUMENT_TEMPLATES: "Системный шаблон документа (Dict.php::upd_document_template)",
+    FileStoreMode.STANDART_DOC: "Документ стандарта для ТО (Dict.php::insert_standart_doc)",
+    FileStoreMode.EMPLOYEE_PHOTO: "Фото сотрудника (уменьшенное)",
+    FileStoreMode.EMPLOYEE_PHOTO_ORIG: "Фото сотрудника (оригинал)",
+    FileStoreMode.CMS_FRONT_WHY_WE: "CMS: «Почему мы»",
+    FileStoreMode.CMS_FRONT_CONSTRUCTOR_REMONT: "CMS: конструктор ремонта",
+    FileStoreMode.CMS_FRONT_REVIEWS: "CMS: фото отзыва",
+    FileStoreMode.CMS_FRONT_REMONT_DETAILS_PHOTO: "CMS: детали ремонта",
+    FileStoreMode.CMS_FRONT_REMONT_DETAILS_PHOTO_MINI: "CMS: детали ремонта (мини)",
+    FileStoreMode.CMS_FRONT_PRESET_INFO_PHOTO: "CMS: информация о пресете",
+    FileStoreMode.CMS_FRONT_PRESET_INFO_PHOTO_MINI: "CMS: информация о пресете (мини)",
+    FileStoreMode.CMS_CONSTRUCTOR_DOCUMENT: "CMS: документ конструктора",
+    FileStoreMode.CMS_FRONT_BRIEF_DOC: "CMS: документ брифа",
+    FileStoreMode.CMS_FRONT_ABOUT: "CMS: «О нас»",
+    FileStoreMode.CMS_FRONT_PARTNER: "CMS: партнёры",
+    FileStoreMode.CMS_TEAM_PHOTO: "CMS: фото команды",
+    FileStoreMode.CMS_BEST_REMONT_RESIDENT: "CMS: лучший ремонт в ЖК",
+    FileStoreMode.CMS_PRESET_MEDIA: "CMS: медиа пресета",
+    FileStoreMode.CMS_PRESET_KIT_INFO_IMG: "CMS: картинка комплекта",
+    FileStoreMode.CMS_PRESET_KIT_INFO_IMG_MINI: "CMS: картинка комплекта (мини)",
+    FileStoreMode.CMS_PRESET_KIT_INFO_PRESENTATION: "CMS: презентация комплекта (лендинг)",
+    FileStoreMode.CMS_BANNER: "CMS: баннер",
+    FileStoreMode.CMS_BANNER_MOBILE: "CMS: баннер (мобильный)",
 }
 
 # Same folders/prefixes as KanbanController::srfileUploadAction.
@@ -150,6 +203,33 @@ MODE_PATH_TEMPLATES: dict[FileStoreMode, str] = {
     FileStoreMode.GUARANTEE_DOCS: "/documents/{date}/guarantee_docs/guarantee_file_{uniq}.{ext}",
     FileStoreMode.ANKETA_FILES: "/documents/{date}/anketa_files/work_file_{uniq}.{ext}",
     FileStoreMode.ANKETA_DOC_FILES: "/documents/{date}/anketa_doc_files/doc_file_{uniq}.{ext}",
+    # Пути — как в Office (Dict.php / System.php / Landing.php), чтобы новые файлы лежали рядом со старыми
+    FileStoreMode.DS_TEMPLATE_DOC: "/documents/{date}/ds_template_doc/ds{uniq}.{ext}",
+    FileStoreMode.TEMPLATE_DOC: "/documents/{date}/template_doc/ds{uniq}.{ext}",
+    FileStoreMode.GRADE_TEMPLATE_DOC: "/documents/{date}/grade_template_doc/grade{uniq}.{ext}",
+    FileStoreMode.DOCUMENT_TEMPLATES: "/documents/document_templates/document_template_{uniq}.{ext}",
+    FileStoreMode.STANDART_DOC: "/documents/agreements/standart_doc{uniq}.{ext}",
+    FileStoreMode.EMPLOYEE_PHOTO: "/documents/{date}/employee_photos/employee_photo{uniq}.{ext}",
+    FileStoreMode.EMPLOYEE_PHOTO_ORIG: "/documents/{date}/employee_photos/original/employee_photo{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_WHY_WE: "/documents/{date}/front_why_we_photo/front_why_we_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_CONSTRUCTOR_REMONT: "/documents/{date}/front_constructor_remont_photo/front_constructor_remont_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_REVIEWS: "/documents/{date}/front_reviews_photo/front_reviews_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_REMONT_DETAILS_PHOTO: "/documents/{date}/front_remont_details_photo/front_remont_details_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_REMONT_DETAILS_PHOTO_MINI: "/documents/{date}/front_remont_details_photo_mini/front_remont_details_photo_mini_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_PRESET_INFO_PHOTO: "/documents/{date}/front_preset_info_photo/front_preset_info_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_PRESET_INFO_PHOTO_MINI: "/documents/{date}/front_preset_info_photo_mini/front_preset_info_photo_mini_{uniq}.{ext}",
+    FileStoreMode.CMS_CONSTRUCTOR_DOCUMENT: "/documents/{date}/constructor_document/constructor_document_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_BRIEF_DOC: "/documents/{date}/front_brief_docs/front_brief_doc_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_ABOUT: "/documents/{date}/front_about_images/front_about_image_{uniq}.{ext}",
+    FileStoreMode.CMS_FRONT_PARTNER: "/documents/{date}/front_partner_images/front_partner_image_{uniq}.{ext}",
+    FileStoreMode.CMS_TEAM_PHOTO: "/documents/{date}/team_photo/team_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_BEST_REMONT_RESIDENT: "/documents/{date}/best_remont_resident_photo/best_remont_resident_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_PRESET_MEDIA: "/documents/{date}/preset_media_files/preset_media_{uniq}.{ext}",
+    FileStoreMode.CMS_PRESET_KIT_INFO_IMG: "/documents/{date}/preset_kit_info_img/preset_kit_info_{uniq}.{ext}",
+    FileStoreMode.CMS_PRESET_KIT_INFO_IMG_MINI: "/documents/{date}/preset_kit_info_img/mini/preset_kit_info_{uniq}.{ext}",
+    FileStoreMode.CMS_PRESET_KIT_INFO_PRESENTATION: "/documents/{date}/landing_preset_kit_files/landing_preset_kit_presentation{uniq}.{ext}",
+    FileStoreMode.CMS_BANNER: "/documents/{date}/front_banner_photo/front_banner_photo_{uniq}.{ext}",
+    FileStoreMode.CMS_BANNER_MOBILE: "/documents/{date}/front_banner_photo_mobile/front_banner_photo_mobile_{uniq}.{ext}",
 }
 
 
