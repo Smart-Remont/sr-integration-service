@@ -38,6 +38,10 @@ class APIShowroomPrefixConfig:
     prefix: str = "/showroom"
 
 
+class APIBiBadgePrefixConfig:
+    prefix: str = "/bi-badge"
+
+
 class APIBuh1cPrefixConfig:
     prefix: str = "/buh_1c"
 
@@ -54,6 +58,7 @@ class APIPrefixConfig:
     showroom: APIShowroomPrefixConfig = APIShowroomPrefixConfig()
     mailing: APIMailingPrefixConfig = APIMailingPrefixConfig()
     buh_1c: APIBuh1cPrefixConfig = APIBuh1cPrefixConfig()
+    bi_badge: APIBiBadgePrefixConfig = APIBiBadgePrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

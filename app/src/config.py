@@ -337,6 +337,18 @@ class KlRecognitionConfig:
 
 
 cors_config = CORSConfig()
+
+
+class BiBadgeConfig:
+    """Public form of BI badges (/bi, /api/bi-badge/*).
+
+    The IP of a client never reaches the database: only HMAC-SHA256 of it with this secret, for the
+    per-IP limit of applications. Empty: the form answers 503.
+    """
+
+    ip_secret: str = os.getenv("BI_BADGE_IP_SECRET", "")
+
+
 big_integration_auth_config = BigIntegrationAuthConfig()
 kaspi_proxy_config = KaspiProxyConfig()
 sms_cron_auth_config = CronAuthConfig("SMS_CRON")
@@ -360,3 +372,4 @@ minio_config = MinioConfig()
 file_store_config = FileStoreConfig()
 kl_recognition_auth_config = KlRecognitionAuthConfig()
 kl_recognition_config = KlRecognitionConfig()
+bi_badge_config = BiBadgeConfig()

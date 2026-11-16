@@ -10,6 +10,8 @@ from src.config import app_config, cors_config
 from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
 from src.features.albato_meta.errors import register_albato_meta_handlers
+from src.features.bi_badge.errors import register_bi_badge_handlers
+from src.features.bi_badge.router import page_router as bi_badge_page_router
 from src.features.big_integration.php_contract import register_big_integration_handlers
 from src.features.buh_1c.errors import register_buh_1c_handlers
 from src.features.kaspi.errors import register_kaspi_handlers
@@ -45,6 +47,7 @@ register_big_integration_handlers(app)
 register_kaspi_handlers(app)
 register_albato_meta_handlers(app)
 register_buh_1c_handlers(app)
+register_bi_badge_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_config.allow_origins,
@@ -85,3 +88,5 @@ if app_config.api_docs_enabled:
 
 
 app.include_router(main_router)
+# Outside /api: the address printed in the QR code of a badge.
+app.include_router(bi_badge_page_router)
