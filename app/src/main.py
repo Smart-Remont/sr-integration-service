@@ -9,6 +9,8 @@ from scalar_fastapi import get_scalar_api_reference
 from src.config import app_config, cors_config
 from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
+from src.features.bi_badge.errors import register_bi_badge_handlers
+from src.features.bi_badge.router import page_router as bi_badge_page_router
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
 
@@ -32,6 +34,7 @@ app = FastAPI(
     redoc_url=None,
 )
 register_infrastructure_handlers(app)
+register_bi_badge_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_config.allow_origins,
@@ -72,3 +75,5 @@ if app_config.api_docs_enabled:
 
 
 app.include_router(main_router)
+# Outside /api: the address printed in the QR code of a badge.
+app.include_router(bi_badge_page_router)

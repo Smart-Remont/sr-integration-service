@@ -10,10 +10,15 @@ class APIBigIntegrationPrefixConfig:
     prefix: str = "/big_integration"
 
 
+class APIBiBadgePrefixConfig:
+    prefix: str = "/bi-badge"
+
+
 class APIPrefixConfig:
     prefix: str = "/api"
     v1: APIV1PrefixConfig = APIV1PrefixConfig()
     big_integration: APIBigIntegrationPrefixConfig = APIBigIntegrationPrefixConfig()
+    bi_badge: APIBiBadgePrefixConfig = APIBiBadgePrefixConfig()
 
 
 api_prefix_config = APIPrefixConfig()

@@ -8,6 +8,8 @@ DESCRIPTION = (
     "| Внутренний REST | `/api/v1/...` | Basic, для прокси CRM ещё JWT `X-Integration-Context` "
     "| Pydantic-схемы, обычные HTTP-коды |\n"
     "| BIG Integration | `/api/big_integration/...` | Basic | конверт `{data, response, error}` |\n"
+    "| Форма бейджей BI | `/bi` (страница), `/api/bi-badge/...` | публичные: открывает клиент по QR, "
+    "лимиты и ловушка для ботов | HTML, JSON `{ok}` или `{field, message}` |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
 )
 
@@ -34,6 +36,14 @@ TAGS = [
             '`{"data", "response", "error"}`: `data` — первая строка refcursor как есть, ошибка '
             "функции БД — HTTP 500 и `error.message`. Контракт заморожен: "
             "`app/tests/big_integration/`."
+        ),
+    },
+    {
+        "name": "BI badges",
+        "description": (
+            "Форма заявки по QR с бейджа сотрудника BI Group: страница `/bi`, список ЖК и приём "
+            "заявки. Заявка — минимальный лид CRM с источником «Бейджи BI» и сотрудником BI по "
+            "коду `ref`. Маршруты публичные, без входа. Нет `BI_BADGE_IP_SECRET` — 503."
         ),
     },
     {
