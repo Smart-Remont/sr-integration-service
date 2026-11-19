@@ -37,3 +37,19 @@ async def put_object(*, key: str, body: bytes, content_type: str | None = None) 
         normalized_key,
         len(body),
     )
+
+
+async def get_object(key: str) -> bytes:
+    normalized_key = key.lstrip("/")
+    session = aioboto3.Session()
+    async with session.client(
+        "s3",
+        endpoint_url=minio_config.endpoint,
+        aws_access_key_id=minio_config.access_key,
+        aws_secret_access_key=minio_config.secret_key,
+        region_name=minio_config.region,
+        config=Config(signature_version="s3v4"),
+    ) as client:
+        response = await client.get_object(Bucket=minio_config.bucket, Key=normalized_key)
+        async with response["Body"] as body:
+            return await body.read()

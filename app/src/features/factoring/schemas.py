@@ -8,6 +8,7 @@ from src.schema import BaseSchema
 
 from .openapi_examples import (
     APPLICATION_RESPONSE,
+    CANCEL_APPLICATION_REQUEST,
     CREATE_APPLICATION_REQUEST,
     CREATE_APPLICATION_RESPONSE,
     WEBHOOK_ACK_RESPONSE,
@@ -39,7 +40,10 @@ class PrepareFactoringDocumentsRequest(BaseSchema):
     period: int = Field(examples=[12])
     created_by: int = Field(examples=[42])
     client_fio: str | None = Field(default=None, description="ФИО клиента для печатных форм")
-    branch_code: str = Field(default="200000")
+    branch_code: str = Field(
+        default="200000",
+        description="Запасной филиал: основной берётся из банка (branch-code-info).",
+    )
     product_id: str | None = None
     prepayment_amount: Decimal | None = None
     interest_rate: Decimal | None = None
@@ -78,6 +82,7 @@ class FactoringSignDocument(BaseSchema):
 class PrepareFactoringDocumentsResponse(BaseSchema):
     id: int
     credit_contract: str
+    branch_code: str
     status: str
     provider_code: str
     documents: list[FactoringSignDocument]
@@ -194,6 +199,21 @@ class FactoringProviderConfigResponse(BaseSchema):
     principal_max: Decimal
     prescoring_enabled: bool = Field(
         description="True when prescoring_base_url and FACTORING_PRESCORING_* env are set",
+    )
+
+
+class CancelFactoringApplicationRequest(BaseSchema):
+    model_config = ConfigDict(json_schema_extra={"examples": [CANCEL_APPLICATION_REQUEST]})
+
+    cancelled_by: int = Field(
+        description="employee_id. Из CRM берётся сотрудник из X-Integration-Context.",
+        examples=[42],
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Причина отмены, пишется в журнал событий.",
+        examples=["Клиент передумал"],
     )
 
 

@@ -10,11 +10,9 @@ from src.exceptions import map_asyncpg_errors
 
 type SpRow = dict[str, object]
 type SpRows = list[SpRow]
-type SpMultiResult = dict[str, SpRows]
-type SpResult = SpRows | SpMultiResult
 
 _FUNCTION_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
-_CURSOR_PLACEHOLDER_RE = re.compile(r"^@cur\d*$")
+_CAST_TYPE_RE = re.compile(r"^[a-z][a-z ]*$")
 
 
 def scalar_from_sp_rows(rows: SpRows) -> object | None:
@@ -22,6 +20,12 @@ def scalar_from_sp_rows(rows: SpRows) -> object | None:
     if not rows:
         return None
     return next(iter(rows[0].values()))
+
+
+def _valid_cast_type(cast: str) -> str:
+    if not _CAST_TYPE_RE.fullmatch(cast):
+        raise ValueError(f"Invalid cast type: {cast}")
+    return cast
 
 
 class BaseRepository:
@@ -58,48 +62,32 @@ class BaseRepository:
         cursor: bool = False,
         session_user_id: int | None = None,
         module_code: str = "MYSPACE",
-    ) -> SpResult:
+        text_casts: Sequence[str | None] = (),
+    ) -> SpRows:
         """
         Call a PostgreSQL stored function.
 
         - Pass arguments directly: call_sp("public.fn", id)
-        - For refcursor reads use cursor=True or pass "@cur"
+        - A function that opens a refcursor as its first argument: cursor=True
+        - Strings the server must convert itself, with its own error text, as PHP sent them:
+          text_casts=("integer", None), one type per argument, None for no conversion
         """
         self._validate_function_name(method)
 
-        call_args = list(args)
-        if cursor and not any(self._is_cursor_placeholder(arg) for arg in call_args):
-            call_args.insert(0, "@cur")
-
-        unique_suffix = uuid.uuid4().hex[:8]
-        bound_args: list[object] = []
-        cursor_names: list[str] = []
-        for arg in call_args:
-            if self._is_cursor_placeholder(arg):
-                cursor_name = self._resolve_cursor_placeholder(arg, unique_suffix)
-                bound_args.append(cursor_name)
-                cursor_names.append(cursor_name)
-            else:
-                bound_args.append(arg)
-
-        query = self._build_select_function_sql(method, len(bound_args))
+        cursor_name = f"cur_{uuid.uuid4().hex[:8]}" if cursor else None
+        bound_args = [cursor_name, *args] if cursor_name else list(args)
+        casts = [None, *text_casts] if cursor_name else list(text_casts)
+        query = self._build_select_function_sql(method, len(bound_args), casts)
 
         with map_asyncpg_errors():
             await self._set_db_session(session_user_id, module_code)
 
-            if not cursor_names:
+            if cursor_name is None:
                 rows = await self.connection.fetch(query, *bound_args)
                 return self._rows_to_dicts(rows)
 
             await self.connection.execute(query, *bound_args)
-
-            if len(cursor_names) == 1:
-                return await self._fetch_refcursor(cursor_names[0])
-
-            return {
-                f"data_{index}": await self._fetch_refcursor(name)
-                for index, name in enumerate(cursor_names, start=1)
-            }
+            return await self._fetch_refcursor(cursor_name)
 
     async def _set_db_session(
         self,
@@ -108,7 +96,8 @@ class BaseRepository:
     ) -> None:
         # Transaction-local (is_local = true): pooled connections are reused by other
         # requests, so a session-level value would leak this user into their audit trail.
-        # Every call runs inside a transaction (DatabaseConnectionDep / committed()).
+        # Calls normally run inside a transaction (DatabaseConnectionDep / committed()). Outside one
+        # (the run lock of a cron) the value ends with this statement and does not reach the function.
         if session_user_id is not None:
             await self.connection.fetchval(
                 "select set_config('myapp.user_id', $1, true)",
@@ -124,26 +113,24 @@ class BaseRepository:
         return self._rows_to_dicts(rows)
 
     @staticmethod
-    def _build_select_function_sql(method: str, args_count: int) -> str:
+    def _build_select_function_sql(
+        method: str,
+        args_count: int,
+        casts: Sequence[str | None] = (),
+    ) -> str:
         if args_count == 0:
             return f"select {method}()"
-        placeholders = ", ".join(f"${index}" for index in range(1, args_count + 1))
+        all_casts = [*casts, *[None] * (args_count - len(casts))]
+        placeholders = ", ".join(
+            f"${index}" if cast is None else f"${index}::text::{_valid_cast_type(cast)}"
+            for index, cast in enumerate(all_casts, start=1)
+        )
         return f"select {method}({placeholders})"
 
     @staticmethod
     def _validate_function_name(method: str) -> None:
         if not _FUNCTION_NAME_RE.fullmatch(method):
             raise ValueError(f"Invalid stored function name: {method}")
-
-    @staticmethod
-    def _resolve_cursor_placeholder(arg: str, unique_suffix: str) -> str:
-        if not _CURSOR_PLACEHOLDER_RE.fullmatch(arg):
-            raise ValueError(f"Invalid refcursor argument: {arg}")
-        return f"{arg}_{unique_suffix}"
-
-    @staticmethod
-    def _is_cursor_placeholder(arg: object) -> bool:
-        return isinstance(arg, str) and arg.startswith("@cur")
 
     @staticmethod
     def _rows_to_dicts(rows: Sequence[Record]) -> SpRows:

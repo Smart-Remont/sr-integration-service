@@ -14,6 +14,7 @@ def main():
             host=gunicorn_config.host,
             port=gunicorn_config.port,
             timeout=gunicorn_config.timeout,
+            graceful_timeout=gunicorn_config.graceful_timeout,
             workers=gunicorn_config.workers,
             log_level=gunicorn_config.log_level,
         ),

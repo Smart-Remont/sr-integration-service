@@ -94,6 +94,25 @@ class FactoringClient:
             resolve_ip=resolve_ip,
         )
 
+    async def get_branch_code(
+        self,
+        base_url: str,
+        access_token: str,
+        iin: str,
+        phone: str,
+        *,
+        resolve_ip: str | None = None,
+        branch_code_path: str = "/ffc-api-public/custom/branch-code-info",
+    ) -> dict[str, Any]:
+        return await self._request(
+            method="GET",
+            base_url=base_url,
+            path=branch_code_path,
+            params={"iin": iin, "phoneNumber": phone},
+            headers=self._auth_header(access_token),
+            resolve_ip=resolve_ip,
+        )
+
     async def send_cession(
         self,
         base_url: str,
@@ -162,16 +181,14 @@ class FactoringClient:
         auth: tuple[str, str] | None = None,
         timeout_sec: float = 30.0,
     ) -> dict[str, Any]:
-        logical_url = f"{base_url.rstrip('/')}{path}"
-        if params:
-            logical_url = f"{logical_url}?{urlencode(params)}"
+        # Параметры запроса могут содержать ИИН и телефон — в журнал только маской.
+        query = f"?{urlencode(self._mask_json_body(params))}" if params else ""
+        logical_url = f"{base_url.rstrip('/')}{path}{query}"
 
         connect_base, resolve_headers, extensions = self._transport_target(base_url, resolve_ip)
         outgoing_headers = self._build_headers(headers)
         outgoing_headers.update(resolve_headers)
-        connect_url = f"{connect_base}{path}"
-        if params:
-            connect_url = f"{connect_url}?{urlencode(params)}"
+        connect_url = f"{connect_base}{path}{query}"
 
         logger.info(
             "Factoring HTTP request | method={method} url={url} connect_url={connect_url} "

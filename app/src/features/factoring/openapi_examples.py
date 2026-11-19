@@ -40,6 +40,8 @@ APPLICATION_RESPONSE = {
     "created_by": 42,
 }
 
+CANCEL_APPLICATION_REQUEST = {"cancelled_by": 42, "reason": "Клиент передумал"}
+
 WEBHOOK_APPROVED = {
     "uuid": "fc58a802-ce40-4c8b-9cff-9f11930e1702",
     "reference_id": "1",
@@ -76,6 +78,19 @@ CREATE_APPLICATION_RESPONSES = {
 APPLICATION_RESPONSES = {
     200: {"description": "OK"},
     404: {"description": "Not found"},
+}
+
+CANCEL_APPLICATION_RESPONSES = {
+    200: {"description": "Заявка отменена (status=CANCELLED), тело — как у GET заявки"},
+    404: {"description": "Заявка не найдена"},
+    409: {
+        "description": "Отменить нельзя: заявка уже в банке или не в NEW / WAITING_SIGN",
+        "content": {
+            "application/json": {
+                "example": {"detail": "Заявка уже отправлена в банк — отменить нельзя"}
+            }
+        },
+    },
 }
 
 WEBHOOK_ACK_RESPONSES = {

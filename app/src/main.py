@@ -9,13 +9,22 @@ from scalar_fastapi import get_scalar_api_reference
 from src.config import app_config, cors_config
 from src.database import close_db_pool, get_db_pool, init_db_pool
 from src.exceptions import register_infrastructure_handlers
+from src.features.albato_meta.errors import register_albato_meta_handlers
+from src.features.big_integration.php_contract import register_big_integration_handlers
+from src.features.buh_1c.errors import register_buh_1c_handlers
+from src.features.kaspi.errors import register_kaspi_handlers
+from src.log_setup import configure_logging
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
+from src.shared.cron_run import install_run_stop_signal
+
+configure_logging()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await init_db_pool()
+    install_run_stop_signal()
     yield
     await close_db_pool()
 
@@ -32,6 +41,10 @@ app = FastAPI(
     redoc_url=None,
 )
 register_infrastructure_handlers(app)
+register_big_integration_handlers(app)
+register_kaspi_handlers(app)
+register_albato_meta_handlers(app)
+register_buh_1c_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_config.allow_origins,

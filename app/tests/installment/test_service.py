@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+from src.exceptions import StoredProcedureError
 from src.features.installment.ff.client import FFClient, FFClientError
 from src.features.installment.ff.repo import (
     FFProvider,
@@ -17,6 +18,7 @@ from src.features.installment.ff.repo import (
 from src.features.installment.ff.service import FFService
 from src.features.installment.schemas import (
     CreateInstallmentApplicationRequest,
+    CreateInstallmentRefundRequest,
     FFProductsResponse,
     InstallmentApplicationResponse,
 )
@@ -117,7 +119,7 @@ def _events(svc: FFService) -> list[str]:
 async def test_create_stores_borrower_and_returns_local_qr():
     svc = _service()
     svc.ff_client.apply_goods_loan_lead = AsyncMock(
-        return_value={"uuid": "u-1", "url": "https://bank.example/goods-loan?uuid=u-1"}
+        return_value={"uuid": "u-1", "redirect_url": "https://bank.example/goods-loan?uuid=u-1"}
     )
 
     result = await svc.create_application(_request())
@@ -126,7 +128,22 @@ async def test_create_stores_borrower_and_returns_local_qr():
     assert kwargs["iin"] == "891026301046"
     assert kwargs["mobile_phone"] == "+77066078118"
     assert result.uuid == "u-1"
+    assert result.redirect_url == "https://bank.example/goods-loan?uuid=u-1"
     assert result.redirect_qr and result.redirect_qr.startswith("data:image/svg+xml")
+    saved = svc.ff_repository.update_application_after_apply.await_args.kwargs
+    assert saved["redirect_url"] == "https://bank.example/goods-loan?uuid=u-1"
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_reading_the_old_url_field():
+    svc = _service()
+    svc.ff_client.apply_goods_loan_lead = AsyncMock(
+        return_value={"uuid": "u-1", "url": "https://bank.example/goods-loan?uuid=u-1"}
+    )
+
+    result = await svc.create_application(_request())
+
+    assert result.redirect_url == "https://bank.example/goods-loan?uuid=u-1"
 
 
 @pytest.mark.asyncio
@@ -469,3 +486,255 @@ def test_bank_field_errors_are_readable():
     with pytest.raises(FFClientError) as exc_info:
         FFClient._parse_response(response)
     assert exc_info.value.detail == "Банк отклонил заявку: partner: Обязательное поле."
+
+
+# --- refund (goods-loan-refund) ---------------------------------------------
+
+
+def _refund_service(prepared: dict | None = None) -> FFService:
+    svc = _service()
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=_application(status="ISSUED"))
+    svc.ff_repository.request_refund = AsyncMock(
+        return_value=prepared
+        or {
+            "application_id": 101,
+            "uuid": "b9ffb5db-f7ec-4c2e-a0ec-f91ff1d2319a",
+            "refund_type": "REFUND",
+            "refund_amount": 1200000,
+            "loan_amount": 1200000,
+            "refunded_before": 0,
+        }
+    )
+    svc.ff_repository.clear_refund = AsyncMock()
+    svc.ff_repository.refund_result = AsyncMock(
+        return_value={"application_id": 101, "changed": True, "status": "REVERSED"}
+    )
+    return svc
+
+
+def _refund_request(**overrides) -> CreateInstallmentRefundRequest:
+    defaults = {"refund_type": "REFUND", "requested_by": 7}
+    defaults.update(overrides)
+    return CreateInstallmentRefundRequest(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_refund_sends_bank_payload_with_refund_hook():
+    svc = _refund_service()
+    svc.ff_client.send_goods_loan_refund = AsyncMock(return_value={"message": "success"})
+
+    result = await svc.create_refund(101, _refund_request())
+
+    payload = svc.ff_client.send_goods_loan_refund.await_args.kwargs["payload"]
+    assert payload == {
+        "uuid": "b9ffb5db-f7ec-4c2e-a0ec-f91ff1d2319a",
+        "partner_id": "SR_PARTNER",
+        "refund_type": "REFUND",
+        "refund_amount": 1200000.0,
+        "hook_url": "https://sr.example/hook/refund",
+    }
+    assert result.refund_status == "REQUESTED"
+    svc.ff_repository.clear_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_bank_validation_error_clears_request():
+    svc = _refund_service()
+    svc.ff_client.send_goods_loan_refund = AsyncMock(
+        side_effect=FFClientError(400, "Передаваемая сумма не соответсвует кредитному договору")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.create_refund(101, _refund_request())
+
+    assert exc_info.value.status_code == 422
+    assert "сумма" in exc_info.value.detail
+    svc.ff_repository.clear_refund.assert_awaited_once_with(101)
+
+
+@pytest.mark.asyncio
+async def test_refund_timeout_keeps_request_for_reconcile():
+    svc = _refund_service()
+    svc.ff_client.send_goods_loan_refund = AsyncMock(
+        side_effect=FFClientError(504, "read timeout", maybe_sent=True)
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.create_refund(101, _refund_request())
+
+    assert exc_info.value.status_code == 504
+    svc.ff_repository.clear_refund.assert_not_awaited()
+    assert "REFUND_UNKNOWN" in _events(svc)
+
+
+@pytest.mark.asyncio
+async def test_refund_db_check_error_is_422_and_bank_not_called():
+    svc = _refund_service()
+    svc.ff_repository.request_refund = AsyncMock(
+        side_effect=StoredProcedureError("Возврат уже отправлен в банк, ждём ответ")
+    )
+    svc.ff_client.send_goods_loan_refund = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.create_refund(101, _refund_request())
+
+    assert exc_info.value.status_code == 422
+    svc.ff_client.send_goods_loan_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_hook_on_general_url_is_routed():
+    svc = _refund_service()
+
+    ack = await svc.handle_webhook(
+        {
+            "uuid": "b9ffb5db-f7ec-4c2e-a0ec-f91ff1d2319a",
+            "partner_id": "SR_PARTNER",
+            "refund_type": "REFUND",
+            "refund_amount": 1200000.0,
+            "covlir_status": "SUCCESS",
+        },
+        authorization_header="Basic x",
+    )
+
+    assert ack.ok
+    kwargs = svc.ff_repository.refund_result.await_args.kwargs
+    assert kwargs["covlir_status"] == "SUCCESS"
+    assert kwargs["refund_amount"] == Decimal(1200000)
+
+
+@pytest.mark.asyncio
+async def test_refund_hook_without_request_is_acked_and_logged():
+    svc = _refund_service()
+    svc.ff_repository.refund_result = AsyncMock(
+        side_effect=StoredProcedureError("Ответ банка о возврате без отправленного запроса")
+    )
+
+    ack = await svc.handle_refund_webhook(
+        {"uuid": "x", "covlir_status": "DECLINE"}, authorization_header="Basic x"
+    )
+
+    assert ack.ok
+    assert "REFUND_WEBHOOK_UNEXPECTED" in _events(svc)
+
+
+@pytest.mark.asyncio
+async def test_poll_resolves_requested_full_refund():
+    svc = _refund_service()
+    requested = _application(
+        status="ISSUED",
+        refund_status="REQUESTED",
+        refund_type="REFUND",
+        refund_requested_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=requested)
+    svc.ff_client.get_goods_application_info = AsyncMock(
+        return_value={"uuid": requested.uuid, "status": "REFUND"}
+    )
+
+    await svc.poll_application(101)
+
+    assert svc.ff_repository.update_application_from_poll.await_args.kwargs["status"] == "ISSUED"
+    svc.ff_repository.refund_result.assert_awaited_once_with(
+        application_id=101, covlir_status="SUCCESS"
+    )
+
+
+@pytest.mark.asyncio
+async def test_poll_issued_after_long_wait_means_decline():
+    svc = _refund_service()
+    requested = _application(
+        status="ISSUED",
+        refund_status="REQUESTED",
+        refund_type="REFUND",
+        refund_requested_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=requested)
+    svc.ff_client.get_goods_application_info = AsyncMock(
+        return_value={"uuid": requested.uuid, "status": "ISSUED"}
+    )
+
+    await svc.poll_application(101)
+
+    svc.ff_repository.refund_result.assert_awaited_once_with(
+        application_id=101, covlir_status="DECLINE"
+    )
+
+
+@pytest.mark.asyncio
+async def test_poll_processing_refund_waits():
+    svc = _refund_service()
+    requested = _application(
+        status="ISSUED",
+        refund_status="REQUESTED",
+        refund_type="REFUND",
+        refund_requested_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    svc.ff_repository.get_application_by_id = AsyncMock(return_value=requested)
+    svc.ff_client.get_goods_application_info = AsyncMock(
+        return_value={"uuid": requested.uuid, "status": "PROCESSING_REFUND"}
+    )
+
+    await svc.poll_application(101)
+
+    svc.ff_repository.refund_result.assert_not_awaited()
+    assert "POLL_UNSUPPORTED_STATUS" not in _events(svc)
+
+
+def test_refund_error_description_is_readable():
+    response = httpx.Response(
+        400,
+        json={"message": "error", "description": "Поле 'refund_type' не может быть пустым"},
+    )
+    with pytest.raises(FFClientError) as exc_info:
+        FFClient._parse_response(response)
+    assert exc_info.value.detail == "Поле 'refund_type' не может быть пустым"
+
+
+@pytest.mark.asyncio
+async def test_apply_sends_reference_id_where_the_bank_reads_it():
+    svc = _service()
+    svc.ff_client.apply_goods_loan_lead = AsyncMock(return_value={"uuid": "u-1"})
+
+    await svc.create_application(_request())
+
+    payload = svc.ff_client.apply_goods_loan_lead.await_args.kwargs["payload"]
+    assert payload["reference_id"] == "101"
+    assert payload["additional_information"]["reference_id"] == "101"
+
+
+@pytest.mark.asyncio
+async def test_sync_products_builds_online_banks_from_catalog():
+    svc = _service()
+    svc.ff_client.get_partner_info = AsyncMock(
+        return_value={
+            "partner_id": "SMART_REMONT",
+            "name": "ТОО SmartRemont",
+            "products": [
+                {
+                    "product_id": "SMARTREMONT_INST",
+                    "repayment_method": "INSTALLMENT",
+                    "repayment": [
+                        {"periods": [6, 12], "principal_limits": {"min": 5000, "max": 1500000}}
+                    ],
+                }
+            ],
+        }
+    )
+    svc.ff_repository.sync_provider_products = AsyncMock(
+        return_value={"inserted": 2, "closed": 0, "unchanged": 0, "ids": [1, 2]}
+    )
+    svc.ff_repository.sync_online_banks = AsyncMock(
+        return_value={
+            "banks_created": 2,
+            "banks_updated": 0,
+            "banks_deactivated": 0,
+            "created_bank_ids": [105, 106],
+        }
+    )
+
+    result = await svc.sync_products()
+
+    svc.ff_repository.sync_online_banks.assert_awaited_once_with(provider_code="FF")
+    assert result.banks_created == 2
+    assert result.created_bank_ids == [105, 106]

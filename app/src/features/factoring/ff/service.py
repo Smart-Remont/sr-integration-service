@@ -19,6 +19,7 @@ from src.exceptions import StoredProcedureError
 from src.shared.deal_guard import check_deal_client_request_state
 
 from ..schemas import (
+    CancelFactoringApplicationRequest,
     CessionApplicationItem,
     CessionBatchResult,
     CessionPreviewRequest,
@@ -66,11 +67,16 @@ from .templates import PRINT_FORM_SPECS, fetch_template_bytes
 
 VALID_WEBHOOK_STATUSES = {"REJECTED", "APPROVED", "ALTERNATIVE", "ISSUED", "PENDING", "IN_PROGRESS"}
 TERMINAL_WEBHOOK_STATUSES = {"ISSUED", "REJECTED", "REVERSED"}
+APPLICATION_STATUS_CANCELLED = "CANCELLED"
+# Отменить можно только заявку, которая ещё не ушла в банк (и нет uuid банка);
+# то же правило — в factoring__application_cancel (sql/factoring/35_cancel_before_bank.sql).
+CANCELLABLE_APPLICATION_STATUSES = {"NEW", "WAITING_SIGN"}
 # 1 сделка = 1 заявка на факторинг: новую заявку можно готовить только если
-# по сделке нет ни одной заявки, кроме REJECTED (отказ банка) или REVERSED
-# (полный возврат) — не только пока нет "активной" (см. factoring__application_create
-# в sql/factoring/27_one_application_per_deal.sql, тот же список статусов).
-RETRYABLE_APPLICATION_STATUSES = {"REJECTED", "REVERSED"}
+# по сделке нет ни одной заявки, кроме REJECTED (отказ банка), REVERSED
+# (полный возврат) или CANCELLED (отменена до банка) — не только пока нет "активной"
+# (см. factoring__application_create в sql/factoring/35_cancel_before_bank.sql,
+# тот же список статусов).
+RETRYABLE_APPLICATION_STATUSES = {"REJECTED", "REVERSED", APPLICATION_STATUS_CANCELLED}
 PRINT_FORMS_CACHE_DIR = Path(gettempdir()) / "factoring-print-forms"
 PRINT_FORM_PUBLIC_URL_TTL_SEC = 72 * 3600
 PRINT_FORM_CACHE_TTL_SEC = 15 * 60
@@ -213,7 +219,13 @@ class FactoringService:
         hook_url = self._required_config_value(provider, "hook_url")
         success_url = self._required_config_value(provider, "success_url")
         failure_url = self._required_config_value(provider, "failure_url")
-        branch_code = (request.branch_code or "200000").strip()
+        branch_code = await self._resolve_branch_code(
+            provider,
+            iin=iin,
+            phone=phone,
+            requested=request.branch_code,
+            client_request_id=request.client_request_id,
+        )
         existing = await self.repository.get_applications_by_client_request(
             request.client_request_id
         )
@@ -224,7 +236,8 @@ class FactoringService:
                 detail=(
                     f"По сделке уже есть заявка на факторинг id={busy[0].id} "
                     f"(status={busy[0].status}). Новую можно оформить только после "
-                    "отказа банка (REJECTED) или полного возврата (REVERSED)."
+                    "отказа банка (REJECTED), полного возврата (REVERSED) или отмены "
+                    "заявки до отправки в банк (CANCELLED)."
                 ),
             )
         credit_contract = self._generate_credit_contract(
@@ -307,6 +320,7 @@ class FactoringService:
         return PrepareFactoringDocumentsResponse(
             id=application_id,
             credit_contract=credit_contract,
+            branch_code=branch_code,
             status="WAITING_SIGN",
             provider_code=PROVIDER_CODE,
             documents=documents,
@@ -543,6 +557,7 @@ class FactoringService:
             credit_contract=application.credit_contract,
             branch_code=application.branch_code or "200000",
             product_id=product_id,
+            prepayment_amount=application.prepayment_amount,
             is_knox=request.is_knox,
         )
         reference_id = str(application.id)
@@ -637,6 +652,53 @@ class FactoringService:
             redirect_url=redirect_url,
             provider_code=PROVIDER_CODE,
         )
+
+    async def cancel_application(
+        self,
+        application_id: int,
+        request: CancelFactoringApplicationRequest,
+    ) -> FactoringApplicationResponse:
+        """Отмена до отправки в банк: заявка в NEW / WAITING_SIGN больше не держит
+        сделку. MyNCA не вызываем: открытый процесс подписи статус заявки не
+        меняет, а submit отменённую заявку не примет."""
+        application = await self.get_application_by_id(application_id)
+        conflict = self._cancel_conflict(application)
+        if conflict:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict)
+        try:
+            await self.repository.cancel_application(
+                application_id=application_id, cancelled_by=request.cancelled_by
+            )
+        except StoredProcedureError as exc:
+            # Та же проверка в БД под блокировкой строки: статус мог смениться
+            # между чтением выше и отменой.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        await self._log_event(
+            "CANCELLED",
+            factoring_id=application_id,
+            source="FACTORING",
+            committed=True,
+            payload={
+                "cancelled_by": request.cancelled_by,
+                "reason": (request.reason or "").strip() or None,
+                "previous_status": application.status,
+            },
+        )
+        return await self.get_application_for_client(application_id)
+
+    @staticmethod
+    def _cancel_conflict(application: FactoringApplicationResponse) -> str | None:
+        if application.uuid:
+            return "Заявка уже отправлена в банк — отменить нельзя"
+        current = (application.status or "").upper()
+        if current == APPLICATION_STATUS_CANCELLED:
+            return "Заявка уже отменена"
+        if current not in CANCELLABLE_APPLICATION_STATUSES:
+            return (
+                f"Заявку в статусе {application.status} отменить нельзя: "
+                "отменяется только заявка до отправки в банк"
+            )
+        return None
 
     async def get_print_form_file(
         self,
@@ -1753,6 +1815,86 @@ class FactoringService:
                     raise self._map_client_error(retry_exc) from retry_exc
             raise self._map_client_error(exc) from exc
 
+    async def _resolve_branch_code(
+        self,
+        provider: FactoringProvider,
+        *,
+        iin: str,
+        phone: str,
+        requested: str | None,
+        client_request_id: int,
+    ) -> str:
+        """Филиал клиента в Colvir (branch-code-info) для номера договора.
+
+        Не ответил или ответил не кодом — заявку не блокируем: остаётся филиал
+        из CRM (по городу сделки или выбранный менеджером), в журнале причина."""
+        fallback = (requested or "200000").strip()
+        try:
+            response = await self._branch_code_with_reauth(provider, iin=iin, phone=phone)
+            bank_code = response.get("branchCode")
+            bank_code = bank_code.strip() if isinstance(bank_code, str) else ""
+            if not bank_code.isdigit():
+                raise ValueError(f"Unexpected branchCode in the bank answer: {bank_code!r}")
+        except (HTTPException, ValueError) as exc:
+            await self._log_event(
+                "BRANCH_CODE_FALLBACK",
+                source="FF_FACTORING",
+                committed=True,
+                payload={
+                    "client_request_id": client_request_id,
+                    "branch_code": fallback,
+                    "error": self._extract_error_message(exc)
+                    if isinstance(exc, HTTPException)
+                    else str(exc),
+                },
+            )
+            return fallback
+        await self._log_event(
+            "BRANCH_CODE_RESOLVED",
+            source="FF_FACTORING",
+            committed=True,
+            payload={
+                "client_request_id": client_request_id,
+                "branch_code": bank_code,
+                "requested": fallback,
+            },
+        )
+        return bank_code
+
+    async def _branch_code_with_reauth(
+        self,
+        provider: FactoringProvider,
+        *,
+        iin: str,
+        phone: str,
+    ) -> dict[str, Any]:
+        access_token = await self._ensure_valid_token(provider)
+        branch_code_path = provider.config.get("branch_code_path")
+        if not isinstance(branch_code_path, str) or not branch_code_path.strip():
+            branch_code_path = "/ffc-api-public/custom/branch-code-info"
+        try:
+            return await self.client.get_branch_code(
+                access_token=access_token,
+                iin=iin,
+                phone=phone,
+                branch_code_path=branch_code_path,
+                **self._request_kwargs(provider),
+            )
+        except FactoringClientError as exc:
+            if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+                access_token = await self._authenticate_and_store_token(provider)
+                try:
+                    return await self.client.get_branch_code(
+                        access_token=access_token,
+                        iin=iin,
+                        phone=phone,
+                        branch_code_path=branch_code_path,
+                        **self._request_kwargs(provider),
+                    )
+                except FactoringClientError as retry_exc:
+                    raise self._map_client_error(retry_exc) from retry_exc
+            raise self._map_client_error(exc) from exc
+
     async def _refund_with_reauth(
         self,
         *,
@@ -1807,9 +1949,8 @@ class FactoringService:
         credit_params: dict[str, Any] = {
             "period": request.period,
             "principal": float(request.principal),
+            "prepayment_amount": float(request.prepayment_amount or 0),
         }
-        if request.prepayment_amount is not None:
-            credit_params["prepayment_amount"] = float(request.prepayment_amount)
         if request.interest_rate is not None:
             credit_params["interest_rate"] = float(request.interest_rate)
 
@@ -1836,9 +1977,20 @@ class FactoringService:
                 "reference_id": reference_id,
             },
             "reference_id": reference_id,
+            # По документации поле необязательное, но банк просит его передавать.
+            # CRM товары не присылает, поэтому одна позиция на всю сумму.
+            "credit_goods": credit_goods
+            or [
+                {
+                    "cost": float(request.principal),
+                    "good_identifier": str(request.client_request_id),
+                    "quantity": 1,
+                    "brand": "Smart Remont",
+                    "model": "Ремонт квартиры",
+                    "category": "Ремонт",
+                }
+            ],
         }
-        if credit_goods:
-            payload["credit_goods"] = credit_goods
         return payload
 
     @staticmethod

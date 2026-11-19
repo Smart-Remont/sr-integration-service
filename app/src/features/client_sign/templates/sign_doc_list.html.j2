@@ -1,0 +1,303 @@
+
+<!-- Шапка -->
+<div class="cs-page-header">
+    <div class="cs-container">
+        <h1><i class="fa fa-file-text-o"></i> Подписание документов</h1>
+        <div class="subtitle">{{ info.resident_name|h }} &mdash; {{ info.client_name|h }}</div>
+    </div>
+</div>
+
+<!-- Предупреждение -->
+<div class="cs-notice">
+    <div class="cs-notice-inner">
+        <i class="fa fa-exclamation-triangle"></i>
+        <span>Настоятельно рекомендуем <b>скачать и ознакомиться</b> с документом перед подписанием.</span>
+    </div>
+</div>
+
+<!-- Информация о клиенте -->
+<div class="cs-client-info">
+    <div class="cs-client-card">
+        <div class="cs-client-card-toggle" data-toggle="collapse" data-target="#clientDetails">
+            <div class="cs-client-name"><i class="fa fa-user-circle-o"></i> {{ info.client_name|h }}</div>
+            <span class="cs-toggle-icon"><i class="fa fa-chevron-down"></i></span>
+        </div>
+        <div id="clientDetails" class="collapse">
+            <div class="cs-client-details">
+                <div>
+                    <div class="cs-detail-label">ЖК</div>
+                    <div class="cs-detail-value">{{ info.resident_name|h }}</div>
+                </div>
+                <div>
+                    <div class="cs-detail-label">Планировка</div>
+                    <div class="cs-detail-value">
+                        <a href="{{ info.orig_image_url }}" target="_blank">
+                            {{ info.planirovka_name|h }} <i class="fa fa-external-link" style="font-size:11px;"></i>
+                        </a>
+                    </div>
+                </div>
+                <div>
+                    <div class="cs-detail-label">Город</div>
+                    <div class="cs-detail-value">{{ info.city_name|h }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Основной контент -->
+<div class="cs-main-content">
+
+    <!-- Табы -->
+    <div class="cs-tabs">
+        <button class="cs-tab-btn active" data-tab="active">
+            Документы
+            <span class="cs-badge-cnt">{{ docs|length }}</span>
+        </button>
+        <button class="cs-tab-btn" data-tab="revoked">
+            Отозванные
+            <span class="cs-badge-cnt">{{ revoked|length }}</span>
+        </button>
+    </div>
+
+    <!-- Активные документы -->
+    <div class="cs-tab-panel active" id="cs-tab-active">
+        {% if not docs %}
+            <div class="cs-empty-state">
+                <i class="fa fa-folder-open-o"></i>
+                <p>Нет документов для подписания</p>
+            </div>
+        {% else %}{% for doc in docs %}
+                <div class="cs-doc-card">
+                    <div class="cs-doc-card-header">
+                        <div class="cs-doc-title">{{ doc.document_type_name|h }}</div>
+                        {% if doc.is_manual %}
+                            <span class="cs-doc-badge cs-doc-badge-manual"><i class="fa fa-pencil"></i> Вручную</span>
+                        {% elif doc.is_signed %}
+                            <span class="cs-doc-badge cs-doc-badge-signed"><i class="fa fa-check"></i> Подписан</span>
+                        {% else %}
+                            <span class="cs-doc-badge cs-doc-badge-unsigned"><i class="fa fa-clock-o"></i> Не подписан</span>
+                        {% endif %}
+                    </div>
+
+                    {% if doc.signature %}
+                        <div class="cs-sign-info cs-sign-info-client">
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-check-circle" style="color:var(--clr-success)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Подписал:</span>
+                                    <span class="cs-sign-info-value">{{ doc.signature.shown_name|h }}</span>
+                                </div>
+                            </div>
+                            {% if doc.signature.iin %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-id-card-o" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">ИИН:</span>
+                                        <span class="cs-sign-info-value">{{ doc.signature.iin|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if doc.signature.date %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-calendar" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">Дата:</span>
+                                        <span class="cs-sign-info-value">{{ doc.signature.date|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if doc.signature.show_raw %}
+                                <details style="margin-top:8px;">
+                                    <summary style="cursor:pointer; color:var(--clr-muted); font-size:12px;">Реквизиты сертификата</summary>
+                                    <div style="margin-top:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size:12px; background:#fff; border:1px solid var(--clr-border); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word;">{{ doc.signature.raw|h }}</div>
+                                </details>
+                            {% endif %}
+
+                            {# PHP keeps one signature here: nca_signed is always false, so "other signatures" never render. #}
+                        </div>
+                    {% endif %}{% if doc.is_manual %}
+                        <div class="cs-sign-info cs-sign-info-client">
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-pencil" style="color:var(--clr-success)"></i>
+                                <div><span class="cs-sign-info-label">Документ подписан вручную</span></div>
+                            </div>
+                        </div>
+                    {% endif %}{% if doc.manager %}
+                        <div class="cs-sign-info cs-sign-info-manager">
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-user-circle" style="color:#0369a1"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Подписал менеджер:</span>
+                                    <span class="cs-sign-info-value">{{ doc.manager.shown_name|h }}</span>
+                                </div>
+                            </div>
+                            {% if doc.manager.iin %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-id-card-o" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">ИИН:</span>
+                                        <span class="cs-sign-info-value">{{ doc.manager.iin|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if doc.manager.bin %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-building-o" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">БИН:</span>
+                                        <span class="cs-sign-info-value">{{ doc.manager.bin|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-calendar" style="color:var(--clr-muted)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Дата:</span>
+                                    <span class="cs-sign-info-value">{{ doc.manager.date|h }}</span>
+                                </div>
+                            </div>
+                            {% if doc.manager.show_raw %}
+                                <details style="margin-top:8px;">
+                                    <summary style="cursor:pointer; color:var(--clr-muted); font-size:12px;">Реквизиты сертификата</summary>
+                                    <div style="margin-top:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size:12px; background:#fff; border:1px solid var(--clr-border); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word;">{{ doc.manager.raw|h }}</div>
+                                </details>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
+                    <!-- Кнопки -->
+                    <div class="cs-doc-actions">
+                        {% if doc.is_ds or doc.is_agreement %}{% if doc.is_signed %}
+                                <a href="/client-sign/download-signed/uuid/{{ doc.uuid }}/doc_type/{{ doc.download_type }}" class="cs-btn-action cs-btn-download">
+                                    <i class="fa fa-download"></i> Скачать подписанный
+                                </a>
+                                <a href="/client-sign/download-cms/uuid/{{ doc.uuid }}/doc_type/{{ doc.download_type }}" class="cs-btn-action cs-btn-download">
+                                    <i class="fa fa-file-code-o"></i> Скачать CMS
+                                </a>
+                            {% else %}
+                                <a href="/client-sign/download/uuid/{{ doc.uuid }}/doc_type/{{ doc.download_type }}" class="cs-btn-action cs-btn-download">
+                                    <i class="fa fa-download"></i> Скачать
+                                </a>
+                            {% endif %}{% endif %}{% if doc.is_manual %}
+                            <a href="{{ doc.uuid }}" class="cs-btn-action cs-btn-download" download="{{ doc.document_type_name|h }}">
+                                <i class="fa fa-download"></i> Скачать
+                            </a>
+                        {% endif %}{% if doc.show_sign_button %}
+                            <a href="/client-sign/perform-sign/uuid/{{ doc.uuid }}/doc_type/{{ doc.doc_type }}/hash/{{ hash }}"
+                               class="cs-btn-action cs-btn-sign"
+                               onclick="return confirmSign(this);">
+                                <i class="fa fa-pencil-square-o"></i> Подписать
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}{% endif %}
+    </div>
+
+    <!-- Отозванные документы -->
+    <div class="cs-tab-panel" id="cs-tab-revoked">
+        {% if not revoked %}
+            <div class="cs-empty-state">
+                <i class="fa fa-check-circle-o"></i>
+                <p>Нет отозванных подписей</p>
+            </div>
+        {% else %}{% for group in revoked %}
+                <div class="cs-doc-card">
+                    <div class="cs-doc-card-header">
+                        <div class="cs-doc-title">{{ group.document_type_name|h }}</div>
+                        <span class="cs-doc-badge cs-doc-badge-revoked"><i class="fa fa-ban"></i> Отозван</span>
+                    </div>
+
+                    {% for sign in group.client_signs %}
+                        <div class="cs-sign-info cs-sign-info-revoked">
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-user" style="color:var(--clr-danger)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Подписал:</span>
+                                    <span class="cs-sign-info-value">{{ sign.shown_name|h }}</span>
+                                </div>
+                            </div>
+                            {% if sign.iin %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-id-card-o" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">ИИН:</span>
+                                        <span class="cs-sign-info-value">{{ sign.iin|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-calendar" style="color:var(--clr-muted)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Дата:</span>
+                                    <span class="cs-sign-info-value">{{ sign.date|h }}</span>
+                                </div>
+                            </div>
+                            {% if sign.show_raw %}
+                                <details style="margin-top:8px;">
+                                    <summary style="cursor:pointer; color:var(--clr-muted); font-size:12px;">Реквизиты сертификата</summary>
+                                    <div style="margin-top:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size:12px; background:#fff; border:1px solid var(--clr-border); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word;">{{ sign.raw|h }}</div>
+                                </details>
+                            {% endif %}
+                        </div>
+                    {% endfor %}{% for sign in group.manager_signs %}
+                        <div class="cs-sign-info cs-sign-info-revoked" style="margin-top:8px;">
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-user-circle" style="color:var(--clr-danger)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Подписал менеджер:</span>
+                                    <span class="cs-sign-info-value">{{ sign.shown_name|h }}</span>
+                                </div>
+                            </div>
+                            {% if sign.iin %}
+                                <div class="cs-sign-info-row">
+                                    <i class="fa fa-id-card-o" style="color:var(--clr-muted)"></i>
+                                    <div>
+                                        <span class="cs-sign-info-label">ИИН:</span>
+                                        <span class="cs-sign-info-value">{{ sign.iin|h }}</span>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            <div class="cs-sign-info-row">
+                                <i class="fa fa-calendar" style="color:var(--clr-muted)"></i>
+                                <div>
+                                    <span class="cs-sign-info-label">Дата:</span>
+                                    <span class="cs-sign-info-value">{{ sign.date|h }}</span>
+                                </div>
+                            </div>
+                            {% if sign.show_raw %}
+                                <details style="margin-top:8px;">
+                                    <summary style="cursor:pointer; color:var(--clr-muted); font-size:12px;">Реквизиты сертификата</summary>
+                                    <div style="margin-top:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size:12px; background:#fff; border:1px solid var(--clr-border); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word;">{{ sign.raw|h }}</div>
+                                </details>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endfor %}{% endif %}
+    </div>
+
+</div>
+
+<script>
+// Табы
+$(document).on('click', '.cs-tab-btn', function() {
+    var tab = $(this).data('tab');
+    $('.cs-tab-btn').removeClass('active');
+    $(this).addClass('active');
+    $('.cs-tab-panel').removeClass('active');
+    $('#cs-tab-' + tab).addClass('active');
+});
+
+// Подтверждение подписания
+function confirmSign(el) {
+    if (!confirm('Вы уверены, что хотите подписать документ?')) {
+        return false;
+    }
+    $(el).html('<i class="fa fa-spinner fa-spin"></i> Подождите...').addClass('cs-is-disabled');
+    return true;
+}
+</script>
+</body>
+</html>

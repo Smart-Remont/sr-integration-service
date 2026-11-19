@@ -13,10 +13,12 @@ from .auth import FactoringBasicAuthDep
 from .deps import FactoringServiceDep
 from .openapi_examples import (
     APPLICATION_RESPONSES,
+    CANCEL_APPLICATION_RESPONSES,
     CREATE_APPLICATION_RESPONSES,
     WEBHOOK_ACK_RESPONSES,
 )
 from .schemas import (
+    CancelFactoringApplicationRequest,
     CessionPreviewRequest,
     CreateFactoringApplicationResponse,
     CreateFactoringRefundRequest,
@@ -161,6 +163,36 @@ async def submit_application(
     if context is not None:
         context.require_application(SCOPE_FACTORING, application_id)
     return await service.submit_application(application_id, request)
+
+
+@router.post(
+    "/applications/{application_id}/cancel",
+    response_model=FactoringApplicationResponse,
+    summary="Отменить заявку до отправки в банк",
+    description=(
+        "Функция БД `factoring__application_cancel`. Вызывает CRM (прокси с "
+        "`X-Integration-Context`). Только для заявки в `NEW` / `WAITING_SIGN` без uuid банка, "
+        "иначе 409. Статус становится `CANCELLED`, по сделке можно оформить новую заявку. "
+        "В журнал событий пишется `CANCELLED` (кто, причина). MyNCA не вызывается: поздняя "
+        "подпись статус не меняет. Ответ — заявка, как у `GET /applications/{id}`."
+    ),
+    responses=CANCEL_APPLICATION_RESPONSES,
+)
+async def cancel_application(
+    _: FactoringBasicAuthDep,
+    context: IntegrationContextDep,
+    application_id: Annotated[int, Path(examples=[1])],
+    request: CancelFactoringApplicationRequest,
+    service: FactoringServiceDep,
+) -> FactoringApplicationResponse:
+    if context is not None:
+        context.require_application(SCOPE_FACTORING, application_id)
+        request = request.model_copy(
+            update={
+                "cancelled_by": employee_id_from_context(context, fallback=request.cancelled_by)
+            }
+        )
+    return await service.cancel_application(application_id, request)
 
 
 @router.get(

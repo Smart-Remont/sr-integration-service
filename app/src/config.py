@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from typing import Self
 
 from dotenv import load_dotenv
 
@@ -26,9 +28,171 @@ def _first_nonempty_env(*names: str, default: str) -> str:
     return default.rstrip("/")
 
 
+def _url_env(name: str) -> str:
+    return os.getenv(name, "").strip().rstrip("/")
+
+
+def _may_carry_a_secret(url: str) -> bool:
+    """On production a token or a password goes over TLS only. A stand may use a local stub."""
+    return app_config.env != "prod" or url.startswith("https://")
+
+
 class BigIntegrationAuthConfig:
     username: str = os.getenv("INTEGRATION_HS_BI_USER", "hs_bi")
     password: str = os.getenv("INTEGRATION_HS_BI_PASSWORD", "")
+
+
+class KaspiProxyConfig:
+    """Shared with nginx, which alone may reach the Kaspi route. Empty secret: 503."""
+
+    secret: str = os.getenv("KASPI_PROXY_SECRET", "")
+
+
+class CronAuthConfig:
+    """Basic auth of the crontab wget lines of one group of crons: <prefix>_USER, <prefix>_PASSWORD.
+
+    Empty: 503.
+    """
+
+    def __init__(self, env_prefix: str) -> None:
+        self.username = os.getenv(f"{env_prefix}_USER", "")
+        self.password = os.getenv(f"{env_prefix}_PASSWORD", "")
+
+
+class Buh1cAuthConfig:
+    """Basic auth of 1C for /api/buh_1c/*, the login written in PHP ``buhAction``. Empty: 503."""
+
+    username: str = os.getenv("BUH_1C_USER", "")
+    password: str = os.getenv("BUH_1C_PASSWORD", "")
+
+
+class ShowroomConfig:
+    """Where the list of showrooms goes. Taken as it is: the slash at its end is part of the address."""
+
+    bi_url: str = os.getenv("SHOWROOM_BI_URL", "").strip()
+
+
+class MailingConfig:
+    """The mail server and the rest of what PHP keeps in ``[email_notify]`` and its code. No defaults."""
+
+    smtp_host: str = os.getenv("MAILING_SMTP_HOST", "").strip()
+    # Not a number counts as not set: 503 on these routes, and the rest of the service still starts.
+    smtp_port: int = (
+        int(os.getenv("MAILING_SMTP_PORT", "").strip())
+        if os.getenv("MAILING_SMTP_PORT", "").strip().isdecimal()
+        else 0
+    )
+    # Also the address letters go from, as ``constants.username`` in PHP.
+    smtp_username: str = os.getenv("MAILING_SMTP_USERNAME", "").strip()
+    smtp_password: str = os.getenv("MAILING_SMTP_PASSWORD", "")
+    from_name: str = os.getenv("MAILING_FROM_NAME", "")
+    # ``getHttpHost()`` of PHP: scheme and host from the wget line of the cron, without a slash.
+    link_base_url: str = os.getenv("MAILING_LINK_BASE_URL", "").strip()
+    # A copy of the letters ``EXPEDITOR_CODE_ACCEPT``.
+    expeditor_cc_address: str = os.getenv("MAILING_EXPEDITOR_CC_ADDRESS", "").strip()
+    expeditor_cc_name: str = os.getenv("MAILING_EXPEDITOR_CC_NAME", "")
+    # ``$_SERVER['DOCUMENT_ROOT']`` of Office: attachments are read from it.
+    office_public_dir: str = os.getenv("MAILING_OFFICE_PUBLIC_DIR", "").strip()
+
+    @property
+    def queue_is_configured(self) -> bool:
+        return bool(
+            self.smtp_host
+            and self.smtp_port
+            and self.smtp_username
+            and self.smtp_password
+            and self.from_name
+            and self.link_base_url
+            and self.expeditor_cc_address
+            and self.office_public_dir
+        )
+
+
+class AutoSignConfig:
+    """Crons of company signing. Empty by default, so a stand without them signs nothing: 503.
+
+    Its own variables: MYNCA_BASE_URL has a production default, and NCA_MASTER_KEY is set wherever
+    cession signing is, which must not arm this cron by itself.
+    """
+
+    mynca_base_url: str = _url_env("AUTO_SIGN_MYNCA_BASE_URL")
+    mynca_token: str = os.getenv("AUTO_SIGN_MYNCA_TOKEN", "").strip()
+    # Decrypts nca.company_key_store_tab. In PHP: constants.master_key.
+    master_key: str = os.getenv("AUTO_SIGN_MASTER_KEY", "")
+
+    @property
+    def signing_is_configured(self) -> bool:
+        # A stand given real values by mistake must not put the company signature on anything.
+        return app_config.env == "prod" and self.upload_is_configured and bool(self.master_key)
+
+    @property
+    def upload_is_configured(self) -> bool:
+        # The token and the company key travel to this address.
+        return self.mynca_base_url.startswith("https://") and bool(self.mynca_token)
+
+
+class KcellConfig:
+    """Sending and status reads are separate Kcell addresses with separate passwords. Empty: 503."""
+
+    send_url: str = os.getenv("KCELL_SEND_URL", "")
+    send_username: str = os.getenv("KCELL_SEND_USER", "")
+    send_password: str = os.getenv("KCELL_SEND_PASSWORD", "")
+    status_url: str = os.getenv("KCELL_BATCH_STATUS_URL", "").rstrip("/")
+    status_username: str = os.getenv("KCELL_BATCH_STATUS_USER", "")
+    status_password: str = os.getenv("KCELL_BATCH_STATUS_PASSWORD", "")
+
+    @property
+    def send_is_configured(self) -> bool:
+        return bool(
+            self.send_url
+            and self.send_username
+            and self.send_password
+            and _may_carry_a_secret(self.send_url)
+        )
+
+    @property
+    def status_is_configured(self) -> bool:
+        return bool(
+            self.status_url
+            and self.status_username
+            and self.status_password
+            and _may_carry_a_secret(self.status_url)
+        )
+
+
+@dataclass(frozen=True)
+class ClientSignConfig:
+    """client-sign pages moved from PHP. Empty by default: the step that needs a value answers 503."""
+
+    mynca_base_url: str = ""
+    mynca_token: str = ""
+    # The address clients and MyNCA see; PHP took it from the request (getHttpHost).
+    public_url: str = ""
+    # Serves /dict/report, /dict/ds-download and the /documents/ files.
+    office_url: str = ""
+    myspace_api_url: str = ""
+    # Partner backend with /get_signed_file, for documents without a MyNCA group.
+    partner_url: str = ""
+    # Keys the back_url given to MyNCA. It is how a callback proves where it came from.
+    callback_secret: str = ""
+
+    @property
+    def mynca_is_configured(self) -> bool:
+        return bool(
+            self.mynca_base_url and self.mynca_token and _may_carry_a_secret(self.mynca_base_url)
+        )
+
+    @classmethod
+    def from_env(cls) -> Self:
+        return cls(
+            mynca_base_url=_url_env("CLIENT_SIGN_MYNCA_BASE_URL"),
+            mynca_token=os.getenv("CLIENT_SIGN_MYNCA_TOKEN", "").strip(),
+            public_url=_url_env("CLIENT_SIGN_PUBLIC_URL"),
+            office_url=_url_env("CLIENT_SIGN_OFFICE_URL"),
+            myspace_api_url=_url_env("CLIENT_SIGN_MYSPACE_API_URL"),
+            partner_url=_url_env("CLIENT_SIGN_PARTNER_URL"),
+            callback_secret=os.getenv("CLIENT_SIGN_CALLBACK_SECRET", ""),
+        )
 
 
 class InstallmentAuthConfig:
@@ -174,6 +338,17 @@ class KlRecognitionConfig:
 
 cors_config = CORSConfig()
 big_integration_auth_config = BigIntegrationAuthConfig()
+kaspi_proxy_config = KaspiProxyConfig()
+sms_cron_auth_config = CronAuthConfig("SMS_CRON")
+auto_sign_cron_auth_config = CronAuthConfig("AUTO_SIGN_CRON")
+buh_1c_auth_config = Buh1cAuthConfig()
+showroom_cron_auth_config = CronAuthConfig("SHOWROOM_CRON")
+showroom_config = ShowroomConfig()
+mailing_cron_auth_config = CronAuthConfig("MAILING_CRON")
+mailing_config = MailingConfig()
+auto_sign_config = AutoSignConfig()
+kcell_config = KcellConfig()
+client_sign_config = ClientSignConfig.from_env()
 installment_auth_config = InstallmentAuthConfig()
 integration_context_config = IntegrationContextConfig()
 factoring_auth_config = FactoringAuthConfig()

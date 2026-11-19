@@ -9,6 +9,8 @@ services:
     env_file:
       - ./app/.env
     restart: unless-stopped
+    # Above GUNICORN_GRACEFUL_TIMEOUT (50 s), so that gunicorn stops its workers, not Docker.
+    stop_grace_period: 60s
 
     develop:
       watch:
