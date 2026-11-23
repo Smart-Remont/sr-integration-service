@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.28.1",
     "jinja2>=3.1.6",
     "loguru>=0.7.3",
+    "mcp>=2.3.0,<2.4",  # v2 API: MCPServer; server middleware is provisional within 2.x
     "opencv-python-headless>=4.12.0",
     "pymupdf>=1.27.0,<2",  # 2.x pulls onnxruntime and layout models we do not need
     "python-dotenv>=1.2.2",

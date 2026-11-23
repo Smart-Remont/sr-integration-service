@@ -195,6 +195,26 @@ class ClientSignConfig:
         )
 
 
+class McpGatewayConfig:
+    """The MCP gateway on /mcp: swaps the caller's sr-mcp token for a myspace-ext one at MySpace.
+
+    Empty address or secret: /mcp answers 503, the rest of the service still starts.
+    """
+
+    myspace_ext_api_url: str = _url_env("MYSPACE_EXT_API_URL")
+    client_id: str = os.getenv("MCP_GATEWAY_CLIENT_ID", "mcp-gateway").strip()
+    client_secret: str = os.getenv("MCP_GATEWAY_CLIENT_SECRET", "")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(
+            self.myspace_ext_api_url
+            and self.client_id
+            and self.client_secret
+            and _may_carry_a_secret(self.myspace_ext_api_url)
+        )
+
+
 class InstallmentAuthConfig:
     username: str = os.getenv("INSTALLMENT_API_USER", "")
     password: str = os.getenv("INSTALLMENT_API_PASSWORD", "")
@@ -360,3 +380,4 @@ minio_config = MinioConfig()
 file_store_config = FileStoreConfig()
 kl_recognition_auth_config = KlRecognitionAuthConfig()
 kl_recognition_config = KlRecognitionConfig()
+mcp_gateway_config = McpGatewayConfig()

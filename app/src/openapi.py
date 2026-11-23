@@ -23,6 +23,8 @@ DESCRIPTION = (
     "| Письма и служебные кроны (перенос из PHP) | `/api/mailing/...` | Basic, вызывает крон "
     "| как в PHP |\n"
     "| Входящие вебхуки | `.../webhook*`, `.../sign-callback` | проверка в обработчике | см. операцию |\n"
+    "| MCP-шлюз для Nexora | `/mcp` (не в этой схеме) | токен Nexora `sr-mcp`, обмен у MySpace "
+    "| JSON-RPC MCP |\n"
 )
 
 TAGS = [
