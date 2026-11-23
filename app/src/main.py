@@ -13,6 +13,8 @@ from src.features.albato_meta.errors import register_albato_meta_handlers
 from src.features.big_integration.php_contract import register_big_integration_handlers
 from src.features.buh_1c.errors import register_buh_1c_handlers
 from src.features.kaspi.errors import register_kaspi_handlers
+from src.features.mcp_gateway.deps import mcp_gateway
+from src.features.mcp_gateway.gateway import MCP_PATH
 from src.log_setup import configure_logging
 from src.openapi import DESCRIPTION, TAGS
 from src.routers import main_router
@@ -25,7 +27,8 @@ configure_logging()
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await init_db_pool()
     install_run_stop_signal()
-    yield
+    async with mcp_gateway.running():
+        yield
     await close_db_pool()
 
 
@@ -85,3 +88,5 @@ if app_config.api_docs_enabled:
 
 
 app.include_router(main_router)
+# The MCP server of the gateway (features/mcp_gateway): an ASGI app, not FastAPI routes.
+app.add_route(MCP_PATH, mcp_gateway, include_in_schema=False)

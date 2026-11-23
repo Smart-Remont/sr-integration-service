@@ -17,7 +17,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from asyncpg.exceptions import RaiseError
+from asyncpg.exceptions import InFailedSQLTransactionError, RaiseError
 from httpx import ASGITransport, AsyncClient
 
 from src.config import big_integration_auth_config
@@ -30,29 +30,67 @@ _CURSOR_RE = re.compile(r'^fetch all in "(.+)"$')
 type SpResponse = list[dict[str, Any]] | Exception | Callable[[tuple[Any, ...]], Any]
 
 
+_ABORTED_MESSAGE = "current transaction is aborted, commands ignored until end of transaction block"
+
+
+class FakeSavepoint:
+    """``connection.transaction()`` inside the request transaction: a savepoint."""
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self._connection = connection
+
+    async def __aenter__(self) -> FakeSavepoint:
+        self._connection.check_not_aborted()
+        return self
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
+        if exc_type is not None:
+            # ROLLBACK TO SAVEPOINT: the request transaction works again.
+            self._connection.aborted = False
+
+
 class FakeConnection:
-    """Answers stored-function calls the way asyncpg does, from a per-test script."""
+    """Answers stored-function calls the way asyncpg does, from a per-test script.
+
+    Like PostgreSQL, a failed call aborts the request transaction: every later
+    command fails until a savepoint around the failed call is rolled back.
+    """
 
     def __init__(self, responses: dict[str, SpResponse]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.aborted = False
         self._cursors: dict[str, list[dict[str, Any]]] = {}
 
+    def check_not_aborted(self) -> None:
+        if self.aborted:
+            raise InFailedSQLTransactionError(_ABORTED_MESSAGE)
+
+    def transaction(self) -> FakeSavepoint:
+        return FakeSavepoint(self)
+
     def _answer(self, function: str, args: tuple[Any, ...]) -> list[dict[str, Any]]:
+        self.check_not_aborted()
         self.calls.append((function, args))
         response = self.responses[function]
-        if isinstance(response, Exception):
-            raise response
-        if callable(response):
-            return response(args)
-        return response
+        try:
+            if isinstance(response, Exception):
+                raise response
+            if callable(response):
+                return response(args)
+            return response
+        except Exception:
+            self.aborted = True
+            raise
 
     async def fetchval(self, query: str, *args: Any) -> None:
+        self.check_not_aborted()
         assert query.startswith("select set_config(")
 
     async def fetch(self, query: str, *args: Any) -> list[dict[str, Any]]:
         cursor = _CURSOR_RE.match(query)
         if cursor:
+            self.check_not_aborted()
             return self._cursors.pop(cursor.group(1))
         function = _FUNCTION_RE.match(query).group(1)
         return self._answer(function, args)
@@ -282,6 +320,34 @@ async def test_repair_pack_prices_reports_each_placement(
             _not_found_row("42", "Подходящий пакет не найден"),
         ]
     )
+
+
+async def test_repair_pack_prices_error_does_not_break_next_placements(
+    client: AsyncClient, db: FakeConnection
+) -> None:
+    """A missing placement first in the batch must not fail the rest with
+    "current transaction is aborted" (prod, 20.11.2026)."""
+
+    def pack_info(args: tuple[Any, ...]) -> list[dict[str, Any]]:
+        if args[0] == "missing":
+            raise RaiseError("{Помещение не найдено}")
+        return [PACK_ROW]
+
+    db.responses = {"rest.ddu_repair_pack_info__get": pack_info}
+
+    response = await client.post(
+        "/api/big_integration/repair-pack-prices",
+        json={"placementUUIDs": ["missing", "found-1", "found-2"]},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data[0] == _not_found_row("missing", "Помещение не найдено")
+    assert [(row["placementUUID"], row["status"], row["error"]) for row in data[1:]] == [
+        ("found-1", True, None),
+        ("found-2", True, None),
+    ]
 
 
 async def test_repair_pack_prices_without_field_returns_empty_list(client: AsyncClient) -> None:
