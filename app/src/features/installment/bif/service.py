@@ -11,6 +11,8 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from src.exceptions import DuplicateKeyError
+
 from ..common import log_event, normalize_iin, require_deal_main_client_request
 from ..constants import ApplicationStatus, InstallmentSource, ProviderCode
 from ..repo import InstallmentProvider, InstallmentRepository
@@ -119,16 +121,20 @@ class BIFService:
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=APPLY_UNKNOWN_DETAIL
             )
 
+        app_id = app_id.strip()
         # Committed: the bank already has the application under this appId.
-        await self.repository.committed(
-            lambda repo: repo.update_application_after_apply(
-                application_id=order.application_id,
-                uuid=app_id.strip(),
-                redirect_url=None,
-                status=ApplicationStatus.IN_PROGRESS,
-                reference_id=order.reference_id,
+        try:
+            await self.repository.committed(
+                lambda repo: repo.update_application_after_apply(
+                    application_id=order.application_id,
+                    uuid=app_id,
+                    redirect_url=None,
+                    status=ApplicationStatus.IN_PROGRESS,
+                    reference_id=order.reference_id,
+                )
             )
-        )
+        except DuplicateKeyError as exc:
+            raise await self._app_id_taken(order, app_id, answer) from exc
         await log_event(
             self.repository,
             "CREATED",
@@ -311,6 +317,31 @@ class BIFService:
             return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
         await self._mark_failed(order, error=exc.message, answer=exc.body)
         return bank_error(exc)
+
+    async def _app_id_taken(
+        self, order: _Order, app_id: str, answer: dict[str, Any]
+    ) -> HTTPException:
+        """The bank answered with an appId another of our applications already holds. Its statuses
+        go to that application, so this one can never be tracked: APPLY_FAILED (frees the deal),
+        and both ids go to the log for a look with BI Finance."""
+        holder = await self.repository.find_application_by_uuid(ProviderCode.BIF, app_id)
+        holder_id = holder.id if holder is not None else None
+        await log_event(
+            self.repository,
+            "BIF_APP_ID_TAKEN",
+            installment_id=order.application_id,
+            source=InstallmentSource.BIF,
+            payload={"app_id": app_id, "holder_application_id": holder_id, "response": answer},
+        )
+        await self.repository.committed(lambda repo: repo.mark_apply_failed(order.application_id))
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"BI Finance вернул номер заявки {app_id}, который уже принадлежит нашей заявке "
+                f"№ {holder_id}. Заявка № {order.application_id} не отправлена в работу; "
+                "передайте оба номера в поддержку."
+            ),
+        )
 
     async def _mark_failed(self, order: _Order, *, error: str, answer: Any = None) -> None:
         await log_event(

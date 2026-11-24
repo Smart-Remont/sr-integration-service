@@ -301,7 +301,8 @@ class InstallmentRepository(BaseRepository):
     @staticmethod
     def _json_result(raw: Any) -> dict[str, Any]:
         if isinstance(raw, str):
-            raw = json.loads(raw)
+            # Decimal, not float: money keeps its digits (900000.00, not 900000.0).
+            raw = json.loads(raw, parse_float=Decimal)
         if not isinstance(raw, dict):
             raise RuntimeError("Unexpected installment function result.")
         return raw

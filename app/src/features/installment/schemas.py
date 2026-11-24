@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, field_validator, model_validator
 
 from src.schema import BaseSchema
 
@@ -474,21 +474,29 @@ class InstallmentOAApplicationListResponse(BaseSchema):
     offset: int
 
 
+def _two_places(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+# Sums of the stats always with two decimals, as the other money fields ("900000.00").
+type Money = Annotated[Decimal, AfterValidator(_two_places)]
+
+
 class InstallmentStatusStats(BaseSchema):
     status: str
     count: int
-    amount: Decimal
+    amount: Money
 
 
 class InstallmentStatsBlock(BaseSchema):
     total_count: int
-    total_amount: Decimal = Field(description="Сумма займов: одобренная банком, иначе запрошенная")
+    total_amount: Money = Field(description="Сумма займов: одобренная банком, иначе запрошенная")
     by_status: list[InstallmentStatusStats]
     issued_count: int = Field(description="Выданы (ISSUED и потом возвращённые REVERSED)")
-    issued_amount: Decimal
+    issued_amount: Money
     conversion: float = Field(description="Выдано / создано, доля 0–1")
     refunded_count: int
-    refunded_amount: Decimal
+    refunded_amount: Money
 
 
 class InstallmentProviderStats(InstallmentStatsBlock):

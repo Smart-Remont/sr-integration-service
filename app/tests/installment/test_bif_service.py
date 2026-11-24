@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
+from src.exceptions import DuplicateKeyError
 from src.features.installment.bif.client import BIFClientError, BIFToken
 from src.features.installment.bif.service import BIFService, bif_phone
 from src.features.installment.ff.service import FFService
@@ -445,3 +446,25 @@ async def test_rejected_token_is_not_handed_out_again():
     tokens = [call.args[1] for call in svc.client.create_order.await_args_list]
     assert tokens == ["stale", "access-1"]
     repo.lock_token_renewal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_app_id_held_by_another_application_fails_this_one_readably():
+    repo = repository()
+    repo.update_application_after_apply = AsyncMock(side_effect=DuplicateKeyError())
+    repo.find_application_by_uuid = AsyncMock(return_value=MagicMock(id=6, status="IN_PROGRESS"))
+    svc = _service(repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.create_application(bif_request())
+
+    assert exc.value.status_code == 502
+    assert "1042" in exc.value.detail and "№ 6" in exc.value.detail and "№ 15" in exc.value.detail
+    repo.mark_apply_failed.assert_awaited_once_with(15)
+    logged = next(
+        call.kwargs
+        for call in repo.insert_event_log.await_args_list
+        if call.kwargs["event_type"] == "BIF_APP_ID_TAKEN"
+    )
+    assert logged["installment_id"] == 15
+    assert logged["payload"]["holder_application_id"] == 6
