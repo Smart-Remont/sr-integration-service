@@ -291,6 +291,9 @@ class InstallmentApplicationResponse(BaseSchema):
     status_comment: str | None = Field(
         default=None, description="BIF: comment из последнего статуса банка (причина отказа и т.п.)"
     )
+    iin: str | None = Field(
+        default=None, description="ИИН заёмщика: введённый при подаче, иначе ИИН клиента сделки"
+    )
     created_at: datetime
     updated_at: datetime
 

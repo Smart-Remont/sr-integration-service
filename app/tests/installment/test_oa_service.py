@@ -50,3 +50,33 @@ async def test_stats_amounts_have_two_decimals():
     assert body["total"]["refunded_amount"] == "0.00"
     assert body["providers"][0]["by_status"][0]["amount"] == "900000.00"
     assert body["providers"][0]["conversion"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_list_items_carry_borrower_iin():
+    repo = MagicMock()
+    row = {
+        "id": 15,
+        "client_request_id": 1,
+        "provider_code": "BIF",
+        "status": "ISSUED",
+        "iin": "900101300123",
+        "client_fio": "Иванов",
+        "total_count": 1,
+        "created_at": "2026-11-24T10:00:00+00:00",
+        "updated_at": "2026-11-24T10:00:00+00:00",
+    }
+    repo.list_applications_for_oa = AsyncMock(return_value=[row])
+
+    answer = await InstallmentOAService(repo).list_applications(
+        provider_code=None,
+        status=None,
+        date_from=None,
+        date_to=None,
+        client_request_id=None,
+        search=None,
+        limit=50,
+        offset=0,
+    )
+
+    assert answer.items[0].iin == "900101300123"
