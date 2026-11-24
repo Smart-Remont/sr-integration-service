@@ -4,8 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from src.features.factoring.ff.service import FactoringService
-from src.features.factoring.schemas import PrescoringFactoringRequest
 from src.features.installment.ff.service import FFService
 from src.features.installment.schemas import CreateInstallmentApplicationRequest
 from src.shared.deal_guard import check_deal_client_request_state
@@ -40,29 +38,6 @@ def test_closed_request_is_rejected(status_code):
     with pytest.raises(HTTPException) as exc:
         check_deal_client_request_state({"crm_deal_id": 1, "status_code": status_code}, 1)
     assert exc.value.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_factoring_prescoring_stops_before_bank_on_draft_request():
-    repository = MagicMock()
-    repository.get_deal_client_request_state = AsyncMock(
-        return_value={"crm_deal_id": 108848, "status_code": None}
-    )
-    svc = FactoringService(repository=repository, client=MagicMock(), app_env="test")
-    svc._require_provider = AsyncMock(return_value=MagicMock())
-    svc._run_prescoring = AsyncMock()
-
-    request = PrescoringFactoringRequest(
-        client_request_id=3042042,
-        iin="040516551071",
-        mobile_phone="+77001234567",
-        principal=Decimal("1000000"),
-    )
-    with pytest.raises(HTTPException) as exc:
-        await svc.run_prescoring(request)
-
-    assert exc.value.status_code == 409
-    svc._run_prescoring.assert_not_awaited()
 
 
 @pytest.mark.asyncio

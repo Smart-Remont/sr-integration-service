@@ -55,13 +55,6 @@ TAGS = [
         ),
     },
     {
-        "name": "Factoring (Freedom Finance)",
-        "description": (
-            "Факторинг Freedom Finance: заявки, прескоринг, печатные формы и подпись через MyNCA, "
-            "цессия, входящие webhooks о статусе и возврате."
-        ),
-    },
-    {
         "name": "Big Integration",
         "description": (
             "API ДДУ для BI Group (боевые маршруты, nginx office → этот сервис). Тело запроса — сырой "

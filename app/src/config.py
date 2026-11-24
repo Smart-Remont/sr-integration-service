@@ -220,19 +220,6 @@ class InstallmentAuthConfig:
     password: str = os.getenv("INSTALLMENT_API_PASSWORD", "")
 
 
-class FactoringAuthConfig:
-    """Basic auth for /api/v1/factoring/*. Falls back to installment creds if unset."""
-
-    username: str = os.getenv(
-        "FACTORING_API_USER",
-        os.getenv("INSTALLMENT_API_USER", ""),
-    )
-    password: str = os.getenv(
-        "FACTORING_API_PASSWORD",
-        os.getenv("INSTALLMENT_API_PASSWORD", ""),
-    )
-
-
 class IntegrationContextConfig:
     """Signed proxy context (CRM → integrations-sr). See docs/integration-context.md."""
 
@@ -258,13 +245,6 @@ class StorageAuthConfig:
     )
 
 
-class FactoringPrescoringConfig:
-    """HTTP Basic for bank prescoring_factoring (separate from JWT apply-lead)."""
-
-    username: str = os.getenv("FACTORING_PRESCORING_USER", "")
-    password: str = os.getenv("FACTORING_PRESCORING_PASSWORD", "")
-
-
 class CORSConfig:
     allow_origins: tuple[str, ...] = _list_env(
         "CORS_ALLOW_ORIGINS",
@@ -273,28 +253,6 @@ class CORSConfig:
     allow_credentials: bool = True
     allow_methods: tuple[str, ...] = ("*",)
     allow_headers: tuple[str, ...] = ("*",)
-
-
-class MyncaConfig:
-    """Client ЭЦП via existing MyNCA (same service as constructor ClientSignController)."""
-
-    base_url: str = os.getenv("MYNCA_BASE_URL", "https://nca.smartremont.kz/api")
-    token: str = os.getenv("MYNCA_TOKEN", "")
-    office_public_url: str = os.getenv(
-        "OFFICE_PUBLIC_URL",
-        "https://office.smartremont.kz",
-    )
-    public_base_url: str = os.getenv(
-        "PUBLIC_BASE_URL",
-        "https://devintegration.smart-remont.kz",
-    )
-    # Company EDS keys used to sign cession (assignment) documents live encrypted
-    # in nca.company_key_store_tab (same DB, managed by the `myspace` admin app —
-    # see myspace-backend/nca/). We decrypt them in Postgres via
-    # nca.company_key_store__get_decrypted(id, master_key) — same master key as
-    # myspace's NCA_MASTER_KEY env var. Which key to use is resolved from
-    # client_request_tab.company_id → nca.company_key_store__read_by_company.
-    nca_master_key: str = os.getenv("NCA_MASTER_KEY", "")
 
 
 class AppConfig:
@@ -371,10 +329,7 @@ kcell_config = KcellConfig()
 client_sign_config = ClientSignConfig.from_env()
 installment_auth_config = InstallmentAuthConfig()
 integration_context_config = IntegrationContextConfig()
-factoring_auth_config = FactoringAuthConfig()
 storage_auth_config = StorageAuthConfig()
-factoring_prescoring_config = FactoringPrescoringConfig()
-mynca_config = MyncaConfig()
 app_config = AppConfig()
 minio_config = MinioConfig()
 file_store_config = FileStoreConfig()

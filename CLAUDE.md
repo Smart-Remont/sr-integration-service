@@ -2,7 +2,7 @@
 
 Единственный файл с правилами репозитория для людей и ИИ-агентов. [AGENTS.md](AGENTS.md) ссылается сюда, [README.md](README.md) — только запуск.
 
-Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: Freedom Finance (рассрочка и факторинг), MyNCA (подписи), BIG Integration (API ДДУ и формы заявок BI Group), загрузка файлов в MinIO, распознавание квартирных листов BI (`kl_recognition`: Composer через Cursor SDK, помощник на Node в `composer_sdk/`, без БД). Перенесено из PHP: оплата заявок Kaspi, кроны SMS Kcell, страницы подписи документов клиентом (`client_sign`), кроны автоподписи компании (`auto_sign`), обмен с 1С (`buh_1c`), кроны писем (`mailing`), лиды Meta через Albato (`albato_meta`), крон шоурумов (`showroom`). Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
+Сервис интеграций Smart Remont: банки, партнёры, застройщики. FastAPI + `asyncpg` поверх функций PostgreSQL, без ORM. Сейчас здесь: рассрочка Freedom Finance и BI Finance, MyNCA (подписи), BIG Integration (API ДДУ и формы заявок BI Group), загрузка файлов в MinIO, распознавание квартирных листов BI (`kl_recognition`: Composer через Cursor SDK, помощник на Node в `composer_sdk/`, без БД). Перенесено из PHP: оплата заявок Kaspi, кроны SMS Kcell, страницы подписи документов клиентом (`client_sign`), кроны автоподписи компании (`auto_sign`), обмен с 1С (`buh_1c`), кроны писем (`mailing`), лиды Meta через Albato (`albato_meta`), крон шоурумов (`showroom`). Интеграций будет много, поэтому каждая новая строится по одним правилам ниже. Отступление от правил — только с записью в «Технический долг».
 
 Общие правила Smart Remont (базы, SQL, ветки других репо, агенты) — `../myspace/CLAUDE.md`. Агент для этого репо — `smart-remont:integrations-dev`. Состояние и выкатка Freedom — `../myspace/features/freedom-factoring/STATUS.md` и `../myspace/sql/freedom-factoring/PROD_APPLY_TODO.md`. Локальные папки `sql/`, `agent-memory/`, `docs/` в `.gitignore`: это ссылки на `../myspace/sql/` и `../myspace/features/`, новые файлы кладутся туда.
 
@@ -173,9 +173,9 @@ app/
 
 Не копировать эти приёмы в новый код; закрывать по мере работы с файлом.
 
-1. **Блокер выкатки факторинга.** Проверка ИИН подписанта печатных форм отключена для теста с Freedom: `FactoringService._sign_callback_iin_error` (`features/factoring/ff/service.py`), три теста `IIN_CHECK_DISABLED` в `tests/factoring/test_sign_callback.py`. Вернуть до `main`.
-2. `features/factoring/ff/service.py` (~3000 строк) и `features/installment/ff/service.py` (~1250) — разбить по процессам: прескоринг, заявка и подача, печатные формы и подпись, вебхуки, цессия, возвраты.
-3. SQL по таблицам в Python вместо функций БД: `features/factoring/ff/repo.py` (обновление прескоринга, поиск заявки, чтения `client_request_tab`, реквизиты компании, номера договоров цессии), `features/installment/ff/repo.py` (`client_request_tab`), `shared/deal_guard.py`. Перевести на функции в `../myspace/sql/`.
+1. Факторинг удалён 24.11.2026 (решение владельца: его не будет); история — в git до коммита удаления.
+2. `features/installment/ff/service.py` (~1250 строк) — разбить по процессам: заявка и подача, вебхуки, сверка, возвраты.
+3. SQL по таблицам в Python вместо функций БД: `features/installment/repo.py` (`client_request_tab`), `shared/deal_guard.py`. Перевести на функции в `../myspace/sql/`.
 4. Вызовы банка и MyNCA идут внутри транзакции запроса и держат соединение пула всё время ответа партнёра.
 5. Маршруты BIG возвращают ответ с ошибкой вместо исключения (см. «Данные и транзакции»). Контракт заморожен, поэтому оставлено; в новых маршрутах так не делать.
 6. Конфиг — классы с `os.getenv` при импорте; при росте числа интеграций перейти на `pydantic-settings` с проверкой обязательных значений при старте.

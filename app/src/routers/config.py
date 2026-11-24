@@ -1,7 +1,6 @@
 class APIV1PrefixConfig:
     prefix: str = "/v1"
     installment_ff: str = "/installment/ff"
-    factoring_ff: str = "/factoring/ff"
     storage: str = "/storage"
     kl_recognition: str = "/kl_recognition"
 
