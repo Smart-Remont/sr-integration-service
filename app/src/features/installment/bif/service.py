@@ -59,6 +59,7 @@ class BIFService:
     ) -> None:
         self.repository = repository
         self.client = client
+        self.app_env = app_env
         self.tokens = BIFTokenSource(repository, client, app_env)
         self.repeat_delay_seconds = repeat_delay_seconds
 
@@ -372,6 +373,12 @@ class BIFService:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Провайдер BI Finance не настроен или выключен.",
+            )
+        # The client secret and the borrower's IIN travel to this address.
+        if self.app_env == "prod" and not provider.base_url.startswith("https://"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="BI Finance: на бою адрес шлюза — только https.",
             )
         return provider
 

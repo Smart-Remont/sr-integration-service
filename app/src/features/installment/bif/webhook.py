@@ -49,9 +49,16 @@ class BIFWebhookService:
                 comment=hook.comment,
             )
         )
+        if result.get("changed"):
+            event_type = "STATUS_UPDATED"
+        elif result.get("status") == hook.status:
+            event_type = "HOOK_DUPLICATE"
+        else:
+            # A status after a final one (CANCELLED after ISSUED): kept for a manual look.
+            event_type = "HOOK_IGNORED"
         await log_event(
             self.repository,
-            "STATUS_UPDATED" if result.get("changed") else "HOOK_DUPLICATE",
+            event_type,
             installment_id=application.id,
             source=InstallmentSource.BIF,
             payload={"hook": hook.model_dump(mode="json", by_alias=True), "result": result},

@@ -189,3 +189,17 @@ def test_route_answers_200(client_with):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True, "status": True}
+
+
+@pytest.mark.asyncio
+async def test_status_after_final_one_is_ignored():
+    repo = repository()
+    repo.update_application_from_bif = AsyncMock(
+        return_value={"application_id": 15, "changed": False, "status": "ISSUED"}
+    )
+    svc = BIFWebhookService(repo)
+
+    answer = await svc.handle_status(_body(status="CANCELLED"), authorization_header=_auth())
+
+    assert answer.ok is True
+    assert "HOOK_IGNORED" in events(repo)
