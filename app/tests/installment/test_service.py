@@ -10,12 +10,12 @@ from fastapi import HTTPException
 
 from src.exceptions import StoredProcedureError
 from src.features.installment.ff.client import FFClient, FFClientError
-from src.features.installment.ff.repo import (
-    FFProvider,
-    FFWebhookApplication,
-    FFWebhookCredential,
-)
 from src.features.installment.ff.service import FFService
+from src.features.installment.repo import (
+    InstallmentProvider,
+    WebhookApplication,
+    WebhookCredential,
+)
 from src.features.installment.schemas import (
     CreateInstallmentApplicationRequest,
     CreateInstallmentRefundRequest,
@@ -23,7 +23,7 @@ from src.features.installment.schemas import (
     InstallmentApplicationResponse,
 )
 
-_PROVIDER = FFProvider(
+_PROVIDER = InstallmentProvider(
     id=7,
     code="FF",
     base_url="https://ff.example",
@@ -75,7 +75,7 @@ def _service() -> FFService:
     repo = MagicMock()
     repo.get_provider_by_code = AsyncMock(return_value=_PROVIDER)
     repo.get_provider_webhook_credentials = AsyncMock(
-        return_value=FFWebhookCredential(username="hook", password_hash="x")
+        return_value=WebhookCredential(username="hook", password_hash="x")
     )
     repo.get_deal_client_request_state = AsyncMock(
         return_value={"status_code": "CONFIRM", "crm_deal_id": 1}
@@ -230,8 +230,8 @@ def _hook(**overrides) -> dict:
     return payload
 
 
-def _found(status: str = "APPROVED", approved_params: dict | None = None) -> FFWebhookApplication:
-    return FFWebhookApplication(id=101, status=status, approved_params=approved_params)
+def _found(status: str = "APPROVED", approved_params: dict | None = None) -> WebhookApplication:
+    return WebhookApplication(id=101, status=status, approved_params=approved_params)
 
 
 @pytest.mark.asyncio

@@ -167,14 +167,15 @@ app/
 
 | Что | Расписание | Как вызывается |
 |---|---|---|
-| Рассрочка Freedom: сверка заявок с банком — статусы без хука, запись выданных в сделку, закрытие неотправленных, итог возвратов | каждые 10 минут | `cronrun__every_10_minutes` → `cron__installment_reconcile()` → `GET /api/v1/installment/ff/reconcile` (Basic из `integration_credential_tab`, провайдер FF, `env = sr_reconcile_cron`). SQL: `../myspace/sql/freedom-installment/29_reconcile_cron.sql` |
+| Рассрочка Freedom: сверка заявок с банком — статусы без хука, запись выданных в сделку, закрытие неотправленных, итог возвратов | каждые 10 минут | `cronrun__every_10_minutes` → `cron__installment_reconcile()` → `GET /api/v1/installment/ff/reconcile` (Basic из `integration_credential_tab`, провайдер FF, `env = sr_reconcile_cron`). SQL: `../myspace/sql/bi-finance-installment/04_reconcile_cron.sql` |
+| Рассрочка BI Finance: заявки без итога банка через 3 рабочих дня → EXPIRED | каждые 10 минут | `cronrun__every_10_minutes` → `cron__installment_expire()` → функция БД `installment__applications_expire` напрямую, без http (ручной запуск — `POST /api/v1/installment/ff/expire`). SQL: `../myspace/sql/bi-finance-installment/05_expire_cron.sql` |
 
 ## Технический долг
 
 Не копировать эти приёмы в новый код; закрывать по мере работы с файлом.
 
 1. Факторинг удалён 24.11.2026 (решение владельца: его не будет); история — в git до коммита удаления.
-2. `features/installment/ff/service.py` (~1250 строк) — разбить по процессам: заявка и подача, вебхуки, сверка, возвраты.
+2. `features/installment/ff/service.py` (~1400 строк) — разбить по процессам: заявка и подача, вебхуки, сверка, возвраты (как `installment/bif/`).
 3. SQL по таблицам в Python вместо функций БД: `features/installment/repo.py` (`client_request_tab`), `shared/deal_guard.py`. Перевести на функции в `../myspace/sql/`.
 4. Вызовы банка и MyNCA идут внутри транзакции запроса и держат соединение пула всё время ответа партнёра.
 5. Маршруты BIG возвращают ответ с ошибкой вместо исключения (см. «Данные и транзакции»). Контракт заморожен, поэтому оставлено; в новых маршрутах так не делать.
