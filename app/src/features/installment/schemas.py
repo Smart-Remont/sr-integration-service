@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from src.schema import BaseSchema
 
@@ -440,6 +440,17 @@ class BIFWebhookPayload(BaseSchema):
     )
 
     app_id: str = Field(alias="appId", min_length=1, max_length=64)
+
+    @field_validator("app_id", mode="before")
+    @classmethod
+    def _numeric_app_id(cls, value: Any) -> Any:
+        # The ТЗ says string, but a number is the same appId.
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
     # Literal, not BIFStatus: the schema is inlined into the route (no $defs to resolve).
     status: Literal["APPROVED", "ISSUED", "REJECTED", "CANCELLED"]
     approved_conditions: dict[str, Any] | None = Field(default=None, alias="approvedConditions")

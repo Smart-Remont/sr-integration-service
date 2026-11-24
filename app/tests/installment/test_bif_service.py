@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -9,7 +10,7 @@ from src.features.installment.bif.client import BIFClientError, BIFToken
 from src.features.installment.bif.service import BIFService, bif_phone
 from src.features.installment.ff.service import FFService
 from src.features.installment.schemas import CreateInstallmentRefundRequest, ManualRefundRequest
-from tests.installment.bif_fakes import application, bif_request, events, repository
+from tests.installment.bif_fakes import PROVIDER, application, bif_request, events, repository
 
 
 def _service(repo: MagicMock | None = None) -> BIFService:
@@ -349,3 +350,98 @@ async def test_bank_refund_of_bif_is_409():
     with pytest.raises(HTTPException) as exc:
         await _ff_service("BIF").create_refund(15, CreateInstallmentRefundRequest(requested_by=7))
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_409_with_app_id_on_first_send_is_another_active_application():
+    svc = _service()
+    svc.client.create_order = AsyncMock(
+        side_effect=BIFClientError(409, "Активная заявка", body={"appId": "777"})
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.create_application(bif_request())
+
+    assert exc.value.status_code == 409
+    svc.repository.update_application_after_apply.assert_not_awaited()
+    svc.repository.mark_apply_failed.assert_awaited_once_with(15)
+
+
+@pytest.mark.asyncio
+async def test_unanswered_application_of_another_borrower_is_409():
+    repo = repository()
+    repo.get_applications_by_client_request = AsyncMock(
+        return_value=[application(id=21, uuid=None, status="APPLY_UNKNOWN")]
+    )
+    svc = _service(repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.create_application(bif_request(iin="910202400234"))
+
+    assert exc.value.status_code == 409
+    assert "другого заёмщика" in exc.value.detail
+    svc.client.create_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config_patch",
+    [
+        {"dealer_id": "000000000000"},
+        {"product_code": "REPLACE_ME"},
+        {"seller_by_company_id": {}, "seller_default": {"bin": "0" * 12, "name": "x", "iban": "y"}},
+        {
+            "seller_by_company_id": {},
+            "seller_default": {"bin": "1" * 12, "name": "REPLACE_ME", "iban": "y"},
+        },
+    ],
+)
+async def test_seed_placeholders_are_not_configured(config_patch):
+    repo = repository()
+    repo.get_provider_by_code = AsyncMock(
+        return_value=replace(PROVIDER, config={**PROVIDER.config, **config_patch})
+    )
+    svc = _service(repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.create_application(bif_request())
+
+    assert exc.value.status_code == 503
+    repo.insert_application.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_renewal_takes_token_another_worker_just_stored():
+    repo = repository()
+    fresh = MagicMock(
+        access_token="from-other-worker",
+        refresh_token="r",
+        expires_at=datetime(2999, 1, 1, tzinfo=UTC),
+    )
+    repo.get_token = AsyncMock(side_effect=[None, fresh])
+    svc = _service(repo)
+
+    await svc.create_application(bif_request())
+
+    repo.lock_token_renewal.assert_awaited_once_with(9)
+    svc.client.issue_token.assert_not_awaited()
+    assert svc.client.create_order.await_args.args[1] == "from-other-worker"
+
+
+@pytest.mark.asyncio
+async def test_rejected_token_is_not_handed_out_again():
+    repo = repository()
+    cached = MagicMock(
+        access_token="stale", refresh_token=None, expires_at=datetime(2999, 1, 1, tzinfo=UTC)
+    )
+    repo.get_token = AsyncMock(return_value=cached)
+    svc = _service(repo)
+    svc.client.create_order = AsyncMock(
+        side_effect=[BIFClientError(401, "expired"), {"appId": "1042"}]
+    )
+
+    await svc.create_application(bif_request())
+
+    tokens = [call.args[1] for call in svc.client.create_order.await_args_list]
+    assert tokens == ["stale", "access-1"]
+    repo.lock_token_renewal.assert_awaited_once()

@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 from loguru import logger
 
-from ..repo import InstallmentProvider, InstallmentRepository
+from ..repo import InstallmentProvider, InstallmentRepository, ProviderToken
 from .client import BIFClient, BIFClientError, BIFToken
 
 DEFAULT_TOKEN_TTL_SECONDS = 300
+# A create with one repeat must fit the CRM proxy's 30 s: 2 × 12 s + the pause and the token.
+DEFAULT_TIMEOUT_SECONDS = 12.0
 _EXPIRY_MARGIN = timedelta(seconds=30)
 
 
@@ -19,13 +21,27 @@ class BIFTokenSource:
         self.client = client
         self.app_env = app_env
 
-    async def access_token(self, provider: InstallmentProvider, *, renew: bool = False) -> str:
-        """A cached token while it lives; then the refresh token; then a new login.
-        ``renew`` — the gateway refused the cached one (401)."""
+    async def access_token(
+        self, provider: InstallmentProvider, *, rejected: str | None = None
+    ) -> str:
+        """The cached token while it lives; else a renewal. ``rejected`` — the token the gateway
+        just answered 401 to: it is not handed out again."""
         cached = await self.repository.get_token(provider.id)
-        now = datetime.now(UTC)
-        if not renew and cached is not None and cached.expires_at > now + _EXPIRY_MARGIN:
+        if cached is not None and _usable(cached, rejected):
             return cached.access_token
+        # One transaction under an advisory lock: workers that need a token at the same time
+        # wait for the first one's renewal instead of all logging in (429). Committed: a
+        # rolled-back request must not throw away a token the gateway already issued.
+        return await self.repository.committed(lambda repo: self._renew(repo, provider, rejected))
+
+    async def _renew(
+        self, repo: InstallmentRepository, provider: InstallmentProvider, rejected: str | None
+    ) -> str:
+        await repo.lock_token_renewal(provider.id)
+        cached = await repo.get_token(provider.id)
+        if cached is not None and _usable(cached, rejected):
+            return cached.access_token
+        token: BIFToken | None = None
         if cached is not None and cached.refresh_token:
             try:
                 token = await self.client.refresh_token(
@@ -33,22 +49,29 @@ class BIFTokenSource:
                     cached.refresh_token,
                     timeout_seconds=timeout_seconds(provider),
                 )
-                return await self._store(provider, token)
             except BIFClientError as exc:
                 if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
                     raise _too_many_requests() from exc
                 logger.info("BIF token refresh refused, logging in | status={s}", s=exc.status_code)
-        return await self._login(provider)
+        if token is None:
+            token = await self._login(repo, provider)
+        await repo.upsert_token(
+            provider_id=provider.id,
+            access_token=token.access_token,
+            refresh_token=token.refresh_token,
+            expires_at=self._expires_at(provider, token),
+        )
+        return token.access_token
 
-    async def _login(self, provider: InstallmentProvider) -> str:
-        credentials = await self.repository.get_active_credentials(provider.id, self.app_env)
+    async def _login(self, repo: InstallmentRepository, provider: InstallmentProvider) -> BIFToken:
+        credentials = await repo.get_active_credentials(provider.id, self.app_env)
         if credentials is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Нет учётки BI Finance (clientId/clientSecret) для env={self.app_env}.",
             )
         try:
-            token = await self.client.issue_token(
+            return await self.client.issue_token(
                 provider.base_url,
                 credentials.username,
                 credentials.password,
@@ -66,9 +89,8 @@ class BIFTokenSource:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"BI Finance: сервис авторизации недоступен ({exc.message}).",
             ) from exc
-        return await self._store(provider, token)
 
-    async def _store(self, provider: InstallmentProvider, token: BIFToken) -> str:
+    def _expires_at(self, provider: InstallmentProvider, token: BIFToken) -> datetime:
         now = datetime.now(UTC)
         expires_at = self.client.access_token_expires_at(token.access_token)
         if token.expires_in is not None:
@@ -76,22 +98,18 @@ class BIFTokenSource:
         if expires_at is None or expires_at <= now:
             ttl = provider.config.get("token_ttl_seconds", DEFAULT_TOKEN_TTL_SECONDS)
             expires_at = now + timedelta(seconds=int(ttl))
-        # Committed: a rolled-back request must not throw away a token the gateway already
-        # issued, or the next call logs in again and runs into 429.
-        await self.repository.committed(
-            lambda repo: repo.upsert_token(
-                provider_id=provider.id,
-                access_token=token.access_token,
-                refresh_token=token.refresh_token,
-                expires_at=expires_at,
-            )
-        )
-        return token.access_token
+        return expires_at
+
+
+def _usable(cached: ProviderToken, rejected: str | None) -> bool:
+    return (
+        cached.access_token != rejected and cached.expires_at > datetime.now(UTC) + _EXPIRY_MARGIN
+    )
 
 
 def timeout_seconds(provider: InstallmentProvider) -> float:
     value = provider.config.get("timeout_seconds")
-    return float(value) if isinstance(value, int | float) and value > 0 else 30.0
+    return float(value) if isinstance(value, int | float) and value > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
 def _too_many_requests() -> HTTPException:

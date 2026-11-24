@@ -203,3 +203,71 @@ async def test_status_after_final_one_is_ignored():
 
     assert answer.ok is True
     assert "HOOK_IGNORED" in events(repo)
+
+
+@pytest.mark.asyncio
+async def test_unknown_app_id_while_orders_await_bank_number_is_503():
+    repo = repository()
+    repo.find_application_by_uuid = AsyncMock(return_value=None)
+    repo.count_applications_awaiting_bank_number = AsyncMock(return_value=1)
+    svc = BIFWebhookService(repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.handle_status(_body(), authorization_header=_auth())
+
+    assert exc.value.status_code == 503
+    assert "WEBHOOK_EARLY" in events(repo)
+
+
+@pytest.mark.asyncio
+async def test_numeric_app_id_is_taken_as_text():
+    repo = repository()
+    svc = BIFWebhookService(repo)
+
+    await svc.handle_status(
+        json.dumps({"appId": 1042, "status": "APPROVED"}).encode(), authorization_header=_auth()
+    )
+
+    assert repo.find_application_by_uuid.await_args.args == ("BIF", "1042")
+
+
+@pytest.mark.asyncio
+async def test_late_issue_with_other_application_on_deal_is_not_applied():
+    repo = repository()
+    repo.update_application_from_bif = AsyncMock(
+        return_value={
+            "application_id": 15,
+            "changed": True,
+            "status": "ISSUED",
+            "after_expired": True,
+            "other_application_id": 31,
+        }
+    )
+    repo.get_application_by_id = AsyncMock(return_value=application(status="ISSUED"))
+    svc = BIFWebhookService(repo)
+
+    await svc.handle_status(_body(status="ISSUED"), authorization_header=_auth())
+
+    repo.apply_application_to_deal.assert_not_awaited()
+    assert {"LATE_ISSUED_AFTER_EXPIRED", "AUTO_APPLY_SKIPPED"} <= set(events(repo))
+
+
+@pytest.mark.asyncio
+async def test_late_issue_without_other_application_is_applied():
+    repo = repository()
+    repo.update_application_from_bif = AsyncMock(
+        return_value={
+            "application_id": 15,
+            "changed": True,
+            "status": "ISSUED",
+            "after_expired": True,
+            "other_application_id": None,
+        }
+    )
+    repo.get_application_by_id = AsyncMock(return_value=application(status="ISSUED"))
+    svc = BIFWebhookService(repo)
+
+    await svc.handle_status(_body(status="ISSUED"), authorization_header=_auth())
+
+    repo.apply_application_to_deal.assert_awaited_once()
+    assert "LATE_ISSUED_AFTER_EXPIRED" in events(repo)

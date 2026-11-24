@@ -1,7 +1,8 @@
 """Statuses BI Finance sends to POST /webhook/bif (ТЗ, раздел 4).
 
 Answers the bank reads: 200 — taken (a repeat too), 404 {"code": "APP_NOT_FOUND"} — unknown appId,
-400 — bad body, 401 — bad login, 503 — our login is not configured (the bank repeats 5xx).
+400 — bad body, 401 — bad login, 503 — our login is not configured or the appId may belong to an
+order whose answer we have not got yet (the bank repeats 5xx).
 """
 
 import json
@@ -33,13 +34,7 @@ class BIFWebhookService:
 
         application = await self.repository.find_application_by_uuid(ProviderCode.BIF, hook.app_id)
         if application is None:
-            await log_event(
-                self.repository,
-                "WEBHOOK_ORPHAN",
-                source=InstallmentSource.BIF,
-                payload={"app_id": hook.app_id, "status": hook.status},
-            )
-            raise BIFApplicationNotFoundError(hook.app_id)
+            await self._unknown_app_id(hook)
 
         result = await self.repository.committed(
             lambda repo: repo.update_application_from_bif(
@@ -64,8 +59,53 @@ class BIFWebhookService:
             payload={"hook": hook.model_dump(mode="json", by_alias=True), "result": result},
         )
         if result.get("status") == BIFStatus.ISSUED:
-            await self._apply_to_deal(application.id)
+            if result.get("changed") and result.get("after_expired"):
+                await self._late_issue(application.id, result)
+            else:
+                await self._apply_to_deal(application.id)
         return WebhookAckResponse(ok=True, status=True)
+
+    async def _unknown_app_id(self, hook: BIFWebhookPayload) -> None:
+        """We learn the appId only from the bank's answer to the order. If that answer is late or
+        lost, the bank's first status comes for an appId we do not know yet: while such orders
+        exist, answer 503 so that the bank repeats (ТЗ: 5xx — повтор). The hook has no
+        partnerId to tell them apart (PLAN.md, вопрос к BI Finance)."""
+        waiting = await self.repository.count_applications_awaiting_bank_number(ProviderCode.BIF)
+        payload = {"app_id": hook.app_id, "status": hook.status, "awaiting_bank_number": waiting}
+        if waiting > 0:
+            await log_event(
+                self.repository, "WEBHOOK_EARLY", source=InstallmentSource.BIF, payload=payload
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Заявка ещё не получила номер BI Finance у нас, повторите позже.",
+            )
+        await log_event(
+            self.repository, "WEBHOOK_ORPHAN", source=InstallmentSource.BIF, payload=payload
+        )
+        raise BIFApplicationNotFoundError(hook.app_id)
+
+    async def _late_issue(self, application_id: int, result: dict[str, Any]) -> None:
+        """ISSUED after our EXPIRED: the money is issued, but the deal may already have another
+        application. Then the credit is not written by itself — a person decides."""
+        other_id = result.get("other_application_id")
+        await log_event(
+            self.repository,
+            "LATE_ISSUED_AFTER_EXPIRED",
+            installment_id=application_id,
+            source=InstallmentSource.BIF,
+            payload={"other_application_id": other_id},
+        )
+        if other_id is not None:
+            await log_event(
+                self.repository,
+                "AUTO_APPLY_SKIPPED",
+                installment_id=application_id,
+                source=InstallmentSource.INSTALLMENT,
+                payload={"reason": "deal_has_other_application", "other_application_id": other_id},
+            )
+            return
+        await self._apply_to_deal(application_id)
 
     async def _check_sender(self, authorization_header: str | None) -> None:
         credentials = await self.repository.get_provider_webhook_credentials(code=ProviderCode.BIF)

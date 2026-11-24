@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.advisory_lock import advisory_lock_key
 from src.shared.deal_guard import fetch_deal_client_request_state
 
 from .schemas import InstallmentApplicationResponse
@@ -48,6 +49,13 @@ class WebhookApplication:
 class ApplicationRef:
     id: int
     status: str
+
+
+@dataclass(slots=True, frozen=True)
+class ApplicationBorrower:
+    iin: str | None
+    mobile_phone: str | None
+    bank_id: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -616,6 +624,41 @@ class InstallmentRepository(BaseRepository):
         if not rows:
             return None
         return ApplicationRef(id=int(rows[0]["id"]), status=str(rows[0]["status"]))
+
+    async def count_applications_awaiting_bank_number(self, provider_code: str) -> int:
+        return int(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__applications_awaiting_bank_number",
+                    provider_code,
+                    module_code="MYSPACE",
+                )
+            )
+            or 0
+        )
+
+    async def get_application_borrower(self, application_id: int) -> ApplicationBorrower | None:
+        rows = await self.call_sp(
+            "public.installment__application_borrower_get",
+            application_id,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return ApplicationBorrower(
+            iin=row["iin"], mobile_phone=row["mobile_phone"], bank_id=row["bank_id"]
+        )
+
+    async def lock_token_renewal(self, provider_id: int) -> None:
+        """Until the end of the transaction: one worker renews the token, the others wait and
+        then take the new one (the gateway answers 429 to frequent logins)."""
+        await self.call_sp(
+            "pg_catalog.pg_advisory_xact_lock",
+            advisory_lock_key(f"installment-token:{provider_id}"),
+            module_code="MYSPACE",
+        )
 
     async def update_application_from_bif(
         self,

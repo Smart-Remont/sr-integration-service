@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import bcrypt
 
-from src.features.installment.repo import InstallmentProvider, WebhookCredential
+from src.features.installment.repo import (
+    ApplicationBorrower,
+    InstallmentProvider,
+    WebhookCredential,
+)
 from src.features.installment.schemas import (
     CreateBIFApplicationRequest,
     InstallmentApplicationResponse,
@@ -103,6 +107,13 @@ def repository() -> MagicMock:
     )
     repo.apply_application_to_deal = AsyncMock(return_value=555)
     repo.refund_manual = AsyncMock(return_value={"application_id": 15})
+    repo.lock_token_renewal = AsyncMock()
+    repo.count_applications_awaiting_bank_number = AsyncMock(return_value=0)
+    repo.get_application_borrower = AsyncMock(
+        return_value=ApplicationBorrower(
+            iin="900101300123", mobile_phone="77010000000", bank_id=101
+        )
+    )
     repo.expire_applications = AsyncMock(return_value={"expired": 2, "ids": [3, 4]})
 
     async def _committed(action):

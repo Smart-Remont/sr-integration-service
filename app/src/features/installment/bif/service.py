@@ -83,6 +83,9 @@ class BIFService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Телефон — мобильный номер Казахстана: +77XXXXXXXXX.",
             )
+        # Placeholders of the seed are «not configured» before anything is stored.
+        _config_text(provider, "product_code")
+        _config_text(provider, "dealer_id")
         seller = await self._seller(provider, request.client_request_id)
 
         repeated = await self._unanswered_application(request)
@@ -161,6 +164,21 @@ class BIFService:
                 and (application.initial_fee or Decimal(0)) == request.initial_fee
                 and application.payment_day == request.payment_day
             )
+            borrower = await self.repository.get_application_borrower(application.id)
+            same_borrower = borrower is not None and (
+                borrower.iin == normalize_iin(request.iin)
+                and borrower.mobile_phone == bif_phone(request.mobile_phone)
+                and borrower.bank_id == request.bank_id
+            )
+            if not same_borrower:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"По сделке есть заявка BI Finance № {application.id} без ответа банка "
+                        "на другого заёмщика (ИИН, телефон или банк). Дождитесь итога: заявка "
+                        "закроется сама, если банк не ответит до срока."
+                    ),
+                )
             if not same_terms:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -230,12 +248,13 @@ class BIFService:
     ) -> dict[str, Any]:
         """``repeated`` — the bank may already hold this partnerId (a repeat or a lost answer)."""
         attempts = 1 + int(provider.config.get("repeat_attempts", 1))
-        renewed = False
+        rejected_token: str | None = None
         attempt = 0
         while True:
             attempt += 1
+            token: str | None = None
             try:
-                token = await self.tokens.access_token(provider, renew=renewed)
+                token = await self.tokens.access_token(provider, rejected=rejected_token)
                 return await self.client.create_order(
                     provider.base_url, token, payload, timeout_seconds=timeout_seconds(provider)
                 )
@@ -248,16 +267,18 @@ class BIFService:
                     await self._mark_failed(order, error=str(exc.detail))
                 raise
             except BIFClientError as exc:
-                if exc.status_code == status.HTTP_401_UNAUTHORIZED and not renewed:
-                    renewed = True
+                if exc.status_code == status.HTTP_401_UNAUTHORIZED and rejected_token is None:
+                    rejected_token = token
                     attempt -= 1
                     continue
                 if (
-                    exc.status_code == status.HTTP_409_CONFLICT
+                    repeated
+                    and exc.status_code == status.HTTP_409_CONFLICT
                     and isinstance(exc.body, dict)
                     and exc.body.get("appId")
                 ):
                     # A repeat of a partnerId the bank already took, answered with its appId.
+                    # On a first send 409 means another active application of the client.
                     return exc.body
                 if exc.maybe_sent:
                     # From here on the bank may hold this partnerId.
@@ -323,8 +344,7 @@ class BIFService:
         if seller is None:
             seller = provider.config.get("seller_default")
         if not isinstance(seller, dict) or not all(
-            isinstance(seller.get(key), str) and seller[key].strip()
-            for key in ("bin", "name", "iban")
+            _configured(seller.get(key)) for key in ("bin", "name", "iban")
         ):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -463,10 +483,18 @@ def bank_error(exc: BIFClientError) -> HTTPException:
             return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=message)
 
 
+def _configured(value: object) -> bool:
+    """Not a seed placeholder: REPLACE_ME or a BIN of zeros (03_providers_and_banks.sql)."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    text = value.strip()
+    return "REPLACE_ME" not in text.upper() and set(text) != {"0"}
+
+
 def _config_text(provider: InstallmentProvider, key: str) -> str:
     value = provider.config.get(key)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    if _configured(value):
+        return str(value).strip()
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=f"BI Finance: не задан config.{key} провайдера.",
