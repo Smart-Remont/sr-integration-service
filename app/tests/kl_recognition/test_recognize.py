@@ -346,10 +346,11 @@ async def test_whole_page_failure_keeps_both_reasons(
     assert composer.read_plan.await_count == 2
 
 
-async def test_terrace_counts_in_the_sum_but_is_not_a_room(
+async def test_terrace_is_a_room_terrace_in_the_sum(
     client: AsyncClient, composer: AsyncMock
 ) -> None:
-    # Darmen 2: a terrace 5,19 (1,56) and a loggia 2,84 (1,42) — operators enter only the loggia.
+    # Darmen 2: a terrace 5,19 (1,56) and a loggia 2,84 (1,42). The terrace is a room of the
+    # sheet «Терраса» (myspace keeps it out of the planirovka), the loggia is a «Балкон».
     terrace = {"name": "Терраса", "type": "Балкон", "area": 5.19, "financialArea": 1.56}
     total = round(ROOMS_SUM + 1.56, 2)
     composer.read_plan.return_value = composer_answer(
@@ -359,9 +360,30 @@ async def test_terrace_counts_in_the_sum_but_is_not_a_room(
 
     assert result["status"] == "recognized"
     assert result["checks"]["rooms_sum"] == total
-    assert [r["name"] for r in result["rooms"]] == ["Кухня", "Лоджия", "Гостиная"]
+    assert [r["name"] for r in result["rooms"]] == ["Кухня", "Лоджия", "Гостиная", "Терраса"]
     assert next(r for r in result["rooms"] if r["name"] == "Лоджия")["system_name"] == "Балкон"
-    assert result["terraces"] == [{"name": "Терраса", "area": 5.19}]
+    terrace_room = result["rooms"][-1]
+    assert (terrace_room["room_id"], terrace_room["system_name"]) == (58, "Терраса")
+    assert (terrace_room["area"], terrace_room["financial_area"]) == (5.19, 1.56)
+    assert "terraces" not in result
+
+
+async def test_terrace_stays_on_an_unrecognised_sheet(
+    client: AsyncClient, composer: AsyncMock
+) -> None:
+    # Family Nest E, кв. 1: a room read 0,05 off fails the sum; the terrace 7,09 (2,13) still
+    # comes back with the rooms — without it they look 2,13 short of 1С.
+    terrace = {"name": "Терраса", "type": "Балкон", "area": 7.09, "financialArea": 2.13}
+    total = round(ROOMS_SUM + 2.13 - 0.05, 2)
+    composer.read_plan.return_value = composer_answer(
+        rooms=[*ROOMS, terrace], checks={"sheetTotal": total}
+    )
+    result = await recognize(client, {"flat_guid": FLAT_GUID, "bi_area": total})
+
+    assert result["status"] == "not_recognized"
+    terrace_room = result["rooms"][-1]
+    assert (terrace_room["name"], terrace_room["room_id"]) == ("Терраса", 58)
+    assert terrace_room["financial_area"] == 2.13
 
 
 async def test_balcony_with_one_printed_area_gets_the_full_area(
