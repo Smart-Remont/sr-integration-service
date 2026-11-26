@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from .room_mapping import (
+    TERRACE_ROOM,
     ReadRoom,
     RoomType,
     full_balcony_area,
@@ -175,7 +176,7 @@ def _neighbors(
     known = [
         (other, target, [(other.name, printed_areas[id(other)]), *other.merged_from])
         for other, target in zip(read, targets, strict=True)
-    ] + [(terrace, None, [(terrace.name, terrace.area)]) for terrace in terraces]
+    ] + [(terrace, TERRACE_ROOM, [(terrace.name, terrace.area)]) for terrace in terraces]
     known = [
         (other, target, [(name, area) for name, area in parts if area is not None])
         for other, target, parts in known
@@ -212,10 +213,9 @@ def _neighbors(
 
 def _rooms(
     raw_rooms: Any, doubts: list[str], sheet_total: float | None
-) -> tuple[list[KlRoom], list[ReadRoom], bool, list[KlProblem]]:
-    """Rooms of the flat mapped to system rooms, terraces kept apart (they count in the
-    sheet total but are not rooms), whether the kitchen is open to the living room, and the
-    areas that are not backed by the sheet."""
+) -> tuple[list[KlRoom], bool, list[KlProblem]]:
+    """Rooms of the flat mapped to system rooms (terraces as «Терраса», last), whether the
+    kitchen is open to the living room, and the areas that are not backed by the sheet."""
     read = []
     quotes: dict[int, str | None] = {}
     for raw in raw_rooms if isinstance(raw_rooms, list) else []:
@@ -276,25 +276,36 @@ def _rooms(
     note_guessed_studio(read, doubts)
     studio = is_kitchen_studio(read)
     targets = system_rooms([room.kind for room in read], [room.area or 0 for room in read])
-    return (
-        [
-            KlRoom(
-                name=room.name,
-                area=room.area,
-                financial_area=room.financial_area,
-                area_text=quotes.get(id(room)) if not room.merged_from else None,
-                room_type=room.kind,
-                room_id=target.room_id if target else None,
-                system_name=target.name if target else None,
-                merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
-                neighbors=_neighbors(room, printed_areas, read, targets, terraces),
-            )
-            for room, target in zip(read, targets, strict=True)
-        ],
-        terraces,
-        studio,
-        problems,
-    )
+    rooms = [
+        KlRoom(
+            name=room.name,
+            area=room.area,
+            financial_area=room.financial_area,
+            area_text=quotes.get(id(room)) if not room.merged_from else None,
+            room_type=room.kind,
+            room_id=target.room_id if target else None,
+            system_name=target.name if target else None,
+            merged_from=[KlRoomPart(name=name, area=area) for name, area in room.merged_from],
+            neighbors=_neighbors(room, printed_areas, read, targets, terraces),
+        )
+        for room, target in zip(read, targets, strict=True)
+    ]
+    # Terraces go last, as rooms «Терраса»: in the sum like every room of the sheet, kept out of
+    # the merges, the numbering of balconies and the studio rule above.
+    rooms += [
+        KlRoom(
+            name=terrace.name,
+            area=terrace.area,
+            financial_area=terrace.financial_area,
+            area_text=quotes.get(id(terrace)),
+            room_type=terrace.kind,
+            room_id=TERRACE_ROOM.room_id,
+            system_name=TERRACE_ROOM.name,
+            neighbors=_neighbors(terrace, printed_areas, read, targets, terraces),
+        )
+        for terrace in terraces
+    ]
+    return rooms, studio, problems
 
 
 def _unmapped_reason(rooms: list[KlRoom]) -> str | None:
@@ -344,13 +355,9 @@ def build_result(
             meta=meta,
         )
 
-    rooms, terraces, studio, problems = _rooms(answer.get("rooms"), doubts, sheet_total)
+    rooms, studio, problems = _rooms(answer.get("rooms"), doubts, sheet_total)
 
-    rooms_sum = round(
-        sum(room.financial_area or 0 for room in rooms)
-        + sum(t.financial_area or 0 for t in terraces),
-        2,
-    )
+    rooms_sum = round(sum(room.financial_area or 0 for room in rooms), 2)
     sheet_ok = None if sheet_total is None else _sums_match(rooms_sum, sheet_total)
     bi_ok = None if bi_area is None else _sums_match(rooms_sum, bi_area)
     # A zone with neither a label nor an area (the sleeping corner of a one-room flat, SHABYT 1, кв. 278)
@@ -410,9 +417,6 @@ def build_result(
         # instead of typing every room. The status, sums and doubts say it is not a result.
         rooms=rooms,
         is_kitchen_studio=studio if status is RecognitionStatus.RECOGNIZED else False,
-        terraces=[KlRoomPart(name=t.name, area=t.area) for t in terraces]
-        if status is RecognitionStatus.RECOGNIZED
-        else [],
         total_area=sheet_total if sheet_total is not None else rooms_sum,
         total_rooms=total_rooms if isinstance(total_rooms, int) else None,
         checks=KlChecks(

@@ -85,8 +85,9 @@ def full_balcony_area(name: str, printed: float) -> float | None:
     return round(printed / BALCONY_COEFFICIENT, 2) if BALCONY_WORD in name.casefold() else None
 
 
-# A terrace is not a room of the flat in the system: planirovki almost never hold one (27 of
-# 52 thousand since 2025), its area is kept on the flat (`flat_tab.terrace_area`).
+# A terrace is a room of the sheet like any other (it is in the sheet total and in 1С), with its
+# own system room «Терраса»; it never reaches a planirovka — myspace drops it where sheet rooms
+# become planirovka rooms (no repair there, no price).
 TERRACE_WORD = "террас"
 
 
@@ -98,6 +99,10 @@ def is_terrace(name: str) -> bool:
 class SystemRoom:
     room_id: int
     name: str
+
+
+# `room_tab` TERRACE (checked 26.11.2026).
+TERRACE_ROOM = SystemRoom(58, "Терраса")
 
 
 @dataclass
