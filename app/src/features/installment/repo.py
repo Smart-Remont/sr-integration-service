@@ -600,17 +600,23 @@ class InstallmentRepository(BaseRepository):
 
     # --- BI Finance ----------------------------------------------------------------
 
-    async def get_deal_company_id(self, client_request_id: int) -> int | None:
-        """ТОО of the deal: BI Finance pays the seller of that company."""
+    async def get_deal_seller(self, client_request_id: int) -> dict[str, Any] | None:
+        """Legal entity of the deal's company (initiator_company_tab): BI Finance pays it."""
         rows = await self.call_sp(
             "public.installment__client_request_get_for_apply",
             client_request_id,
             cursor=True,
             module_code="MYSPACE",
         )
-        if not rows or rows[0].get("company_id") is None:
+        if not rows:
             return None
-        return int(rows[0]["company_id"])
+        row = rows[0]
+        return {
+            "company_id": row.get("company_id"),
+            "bin": row.get("seller_bin"),
+            "name": row.get("seller_name"),
+            "iban": row.get("seller_iban"),
+        }
 
     async def find_application_by_uuid(
         self, provider_code: str, uuid: str

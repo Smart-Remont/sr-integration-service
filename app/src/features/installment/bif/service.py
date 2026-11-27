@@ -4,6 +4,7 @@ The bank's statuses come to ``webhook.py``. There is no poll and no refund throu
 """
 
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -88,7 +89,7 @@ class BIFService:
         # Placeholders of the seed are «not configured» before anything is stored.
         _config_text(provider, "product_code")
         _config_text(provider, "dealer_id")
-        seller = await self._seller(provider, request.client_request_id)
+        seller = await self._seller(request.client_request_id)
 
         repeated = await self._unanswered_application(request)
         order = repeated or await self._insert_application(provider, request, iin, phone)
@@ -363,25 +364,22 @@ class BIFService:
         )
         await self.repository.committed(lambda repo: repo.mark_apply_unknown(order.application_id))
 
-    async def _seller(
-        self, provider: InstallmentProvider, client_request_id: int
-    ) -> dict[str, str]:
-        """Who BI Finance pays: the deal's company (config.seller_by_company_id), else the default."""
-        company_id = await self.repository.get_deal_company_id(client_request_id)
-        by_company = provider.config.get("seller_by_company_id")
-        seller = None
-        if isinstance(by_company, dict) and company_id is not None:
-            seller = by_company.get(str(company_id))
-        if seller is None:
-            seller = provider.config.get("seller_default")
-        if not isinstance(seller, dict) or not all(
-            _configured(seller.get(key)) for key in ("bin", "name", "iban")
-        ):
+    async def _seller(self, client_request_id: int) -> dict[str, str]:
+        """Who BI Finance pays: the deal company's legal entity from initiator_company_tab."""
+        seller = await self.repository.get_deal_seller(client_request_id)
+        values = {
+            key: str((seller or {}).get(key) or "").strip() for key in ("bin", "name", "iban")
+        }
+        if not all(values.values()) or not re.fullmatch(r"\d{12}", values["bin"]):
+            company_id = (seller or {}).get("company_id")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"BI Finance: не настроен продавец для ТОО сделки (company_id={company_id}).",
+                detail=(
+                    "BI Finance: у ТОО сделки не заполнены БИН, название или счёт "
+                    f"(initiator_company_tab, company_id={company_id})."
+                ),
             )
-        return {key: seller[key].strip() for key in ("bin", "name", "iban")}
+        return values
 
     # --- manual refund and expiry ---------------------------------------------------
 

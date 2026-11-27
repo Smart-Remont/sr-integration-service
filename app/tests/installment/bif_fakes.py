@@ -31,8 +31,6 @@ PROVIDER = InstallmentProvider(
     config={
         "product_code": "bezzalogovyy-kredit",
         "dealer_id": "111111111111",
-        "seller_by_company_id": {"8": {"bin": "222222222222", "name": "TOO Azure", "iban": "KZ01"}},
-        "seller_default": {"bin": "333333333333", "name": "TOO Smart Remont", "iban": "KZ02"},
         "repayment_type": "0",
         "scheme_def_payment": "0",
         "is_deferred_principal": False,
@@ -88,7 +86,9 @@ def repository() -> MagicMock:
     repo.get_deal_client_request_state = AsyncMock(
         return_value={"status_code": "CONFIRM", "crm_deal_id": 1}
     )
-    repo.get_deal_company_id = AsyncMock(return_value=8)
+    repo.get_deal_seller = AsyncMock(
+        return_value={"company_id": 8, "bin": "222222222222", "name": "TOO Azure", "iban": "KZ01"}
+    )
     repo.get_applications_by_client_request = AsyncMock(return_value=[])
     repo.insert_application = AsyncMock(return_value=15)
     repo.update_application_after_apply = AsyncMock()

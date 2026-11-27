@@ -236,14 +236,40 @@ async def test_no_hook_login_no_application():
 
 
 @pytest.mark.asyncio
-async def test_default_seller_when_company_not_configured():
-    repo = repository()
-    repo.get_deal_company_id = AsyncMock(return_value=1)
-    svc = _service(repo)
+async def test_seller_from_deal_company():
+    svc = _service(repository())
 
     await svc.create_application(bif_request())
 
-    assert svc.client.create_order.await_args.args[2]["orderData"]["sellerBin"] == "333333333333"
+    order_data = svc.client.create_order.await_args.args[2]["orderData"]
+    assert (order_data["sellerBin"], order_data["sellerCompany"], order_data["sellerIban"]) == (
+        "222222222222",
+        "TOO Azure",
+        "KZ01",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "seller",
+    [
+        None,
+        {"company_id": 2, "bin": None, "name": "TOO Shipment", "iban": None},
+        {"company_id": 5, "bin": "123", "name": "TOO X", "iban": "KZ01"},
+        {"company_id": 5, "bin": "123456789012", "name": "TOO X", "iban": " "},
+    ],
+)
+async def test_no_seller_no_application(seller):
+    repo = repository()
+    repo.get_deal_seller = AsyncMock(return_value=seller)
+    svc = _service(repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await svc.create_application(bif_request())
+
+    assert exc.value.status_code == 503
+    assert "initiator_company_tab" in exc.value.detail
+    repo.insert_application.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -390,11 +416,6 @@ async def test_unanswered_application_of_another_borrower_is_409():
     [
         {"dealer_id": "000000000000"},
         {"product_code": "REPLACE_ME"},
-        {"seller_by_company_id": {}, "seller_default": {"bin": "0" * 12, "name": "x", "iban": "y"}},
-        {
-            "seller_by_company_id": {},
-            "seller_default": {"bin": "1" * 12, "name": "REPLACE_ME", "iban": "y"},
-        },
     ],
 )
 async def test_seed_placeholders_are_not_configured(config_patch):
