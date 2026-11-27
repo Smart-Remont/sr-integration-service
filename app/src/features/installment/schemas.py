@@ -1,16 +1,21 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, field_validator, model_validator
 
 from src.schema import BaseSchema
 
 from .openapi_examples import (
     APPLICATION_RESPONSE,
+    BIF_CREATE_APPLICATION_REQUEST,
+    BIF_WEBHOOK_APPROVED,
+    BIF_WEBHOOK_ISSUED,
     CREATE_APPLICATION_REQUEST,
     CREATE_APPLICATION_RESPONSE,
     FF_PRODUCTS_RESPONSE,
+    MANUAL_REFUND_REQUEST,
+    OA_STATS_RESPONSE,
     PROVIDER_PRODUCTS_LIST_RESPONSE,
     SYNC_PRODUCTS_RESPONSE,
     WEBHOOK_ACK_RESPONSE,
@@ -181,6 +186,37 @@ class CreateInstallmentApplicationRequest(BaseSchema):
     created_by: int = Field(description="ID пользователя (hunter)", examples=[42])
 
 
+class CreateBIFApplicationRequest(BaseSchema):
+    """BI Finance: заявка на беззалоговый кредит. Номер у банка (partnerId) — SR-<id заявки>."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        json_schema_extra={"examples": [BIF_CREATE_APPLICATION_REQUEST]},
+    )
+
+    client_request_id: int = Field(description="ID ремонта в SR (client_request_tab)")
+    provider_code: Literal["BIF"] = Field(description="Провайдер рассрочки")
+    bank_id: int = Field(description="Онлайн-банк BI Finance из GET /allowed-banks")
+    iin: str = Field(description="ИИН заёмщика, 12 цифр")
+    mobile_phone: str = Field(
+        description="Телефон заёмщика: +77…, 77… или 87…; в BI Finance уходит 77XXXXXXXXX"
+    )
+    principal: int = Field(gt=0, description="Сумма кредита, целое число тенге")
+    period: int = Field(gt=0, description="Срок, месяцев")
+    initial_fee: Decimal = Field(default=Decimal(0), ge=0, description="Первоначальный взнос, ₸")
+    payment_day: int = Field(ge=1, le=20, description="День платежа, 1–20")
+    created_by: int = Field(description="employee_id менеджера")
+
+
+# Plain assignment, not ``type``: FastAPI reads the discriminator from the Annotated body type.
+CreateApplicationRequest = Annotated[
+    CreateInstallmentApplicationRequest | CreateBIFApplicationRequest,
+    Field(discriminator="provider_code"),
+]
+
+
 class CreateInstallmentApplicationResponse(BaseSchema):
     model_config = ConfigDict(
         from_attributes=True,
@@ -242,6 +278,22 @@ class InstallmentApplicationResponse(BaseSchema):
     refund_requested_by: int | None = None
     refund_requested_at: datetime | None = None
     refund_completed_at: datetime | None = None
+    refund_mode: str | None = Field(
+        default=None,
+        description="BANK — возврат через банк (FF); MANUAL — отметка сотрудника (BIF)",
+    )
+    refund_comment: str | None = Field(default=None, description="MANUAL: комментарий сотрудника")
+    initial_fee: Decimal | None = Field(default=None, description="BIF: первоначальный взнос")
+    payment_day: int | None = Field(default=None, description="BIF: день платежа, 1–20")
+    expires_at: datetime | None = Field(
+        default=None, description="BIF: без итога банка к этому моменту заявка станет EXPIRED"
+    )
+    status_comment: str | None = Field(
+        default=None, description="BIF: comment из последнего статуса банка (причина отказа и т.п.)"
+    )
+    iin: str | None = Field(
+        default=None, description="ИИН заёмщика: введённый при подаче, иначе ИИН клиента сделки"
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -265,7 +317,10 @@ class AllowedBankResponse(BaseSchema):
     repayment_method: str | None = None
     bank_code: str
     bank_name: str
-    credit_program_id: int
+    credit_program_id: int | None = Field(
+        default=None, description="Кредитная программа ЖК; у BI Finance нет (банк для любой сделки)"
+    )
+    provider_code: str | None = Field(default=None, description="FF | BIF")
 
 
 class AllowedBankListResponse(BaseSchema):
@@ -354,3 +409,110 @@ class WebhookAckResponse(BaseSchema):
 
     ok: bool = Field(examples=[True])
     status: bool = Field(default=True, examples=[True])
+
+
+class ManualRefundRequest(BaseSchema):
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        json_schema_extra={"examples": [MANUAL_REFUND_REQUEST]},
+    )
+
+    amount: Decimal = Field(gt=0, description="Сумма возврата, ₸")
+    comment: str = Field(
+        min_length=1, max_length=1000, description="Заявление клиента, платёжка и т.п."
+    )
+    created_by: int = Field(description="employee_id, кто отмечает возврат")
+    refunded_at: date | None = Field(
+        default=None, description="Дата возврата (по умолчанию сегодня), не в будущем"
+    )
+
+
+class ExpireResponse(BaseSchema):
+    expired: int = Field(description="Сколько заявок закрыто как EXPIRED")
+    ids: list[int]
+
+
+class BIFWebhookPayload(BaseSchema):
+    """Тело статуса BI Finance (ТЗ, раздел 4). Ключи — как присылает банк."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"examples": [BIF_WEBHOOK_APPROVED, BIF_WEBHOOK_ISSUED]},
+    )
+
+    app_id: str = Field(alias="appId", min_length=1, max_length=64)
+
+    @field_validator("app_id", mode="before")
+    @classmethod
+    def _numeric_app_id(cls, value: Any) -> Any:
+        # The ТЗ says string, but a number is the same appId.
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    # Literal, not BIFStatus: the schema is inlined into the route (no $defs to resolve).
+    status: Literal["APPROVED", "ISSUED", "REJECTED", "CANCELLED"]
+    approved_conditions: dict[str, Any] | None = Field(default=None, alias="approvedConditions")
+    comment: str | None = None
+
+
+class BIFWebhookNotFound(BaseSchema):
+    code: Literal["APP_NOT_FOUND"] = "APP_NOT_FOUND"
+
+
+class InstallmentOAApplication(InstallmentApplicationResponse):
+    client_fio: str | None = None
+    city_name: str | None = None
+    company_name: str | None = None
+
+
+class InstallmentOAApplicationListResponse(BaseSchema):
+    items: list[InstallmentOAApplication]
+    total: int = Field(description="Сколько заявок под фильтром без limit/offset")
+    limit: int
+    offset: int
+
+
+def _two_places(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+# Sums of the stats always with two decimals, as the other money fields ("900000.00").
+type Money = Annotated[Decimal, AfterValidator(_two_places)]
+
+
+class InstallmentStatusStats(BaseSchema):
+    status: str
+    count: int
+    amount: Money
+
+
+class InstallmentStatsBlock(BaseSchema):
+    total_count: int
+    total_amount: Money = Field(description="Сумма займов: одобренная банком, иначе запрошенная")
+    by_status: list[InstallmentStatusStats]
+    issued_count: int = Field(description="Выданы (ISSUED и потом возвращённые REVERSED)")
+    issued_amount: Money
+    conversion: float = Field(description="Выдано / создано, доля 0–1")
+    refunded_count: int
+    refunded_amount: Money
+
+
+class InstallmentProviderStats(InstallmentStatsBlock):
+    provider_code: str
+
+
+class InstallmentStatsResponse(BaseSchema):
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        json_schema_extra={"examples": [OA_STATS_RESPONSE]},
+    )
+
+    providers: list[InstallmentProviderStats]
+    total: InstallmentStatsBlock

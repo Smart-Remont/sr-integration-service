@@ -8,7 +8,7 @@ from src.integration_context.helpers import employee_id_from_context
 from src.routers import api_prefix_config
 
 from .auth import InstallmentBasicAuthDep
-from .deps import FFServiceDep
+from .deps import BIFServiceDep, FFServiceDep
 from .openapi_examples import (
     APPLICATION_RESPONSES,
     CREATE_APPLICATION_RESPONSES,
@@ -21,7 +21,8 @@ from .schemas import (
     AllowedBankListResponse,
     ApplyInstallmentApplicationRequest,
     ApplyInstallmentApplicationResponse,
-    CreateInstallmentApplicationRequest,
+    CreateApplicationRequest,
+    CreateBIFApplicationRequest,
     CreateInstallmentApplicationResponse,
     CreateInstallmentRefundRequest,
     FFProductsResponse,
@@ -139,24 +140,32 @@ async def list_applications(
     "/applications",
     response_model=CreateInstallmentApplicationResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Создать заявку на рассрочку (FF)",
+    summary="Создать заявку на рассрочку (FF или BIF)",
     description=(
-        "Создаёт запись в БД, вызывает FF `goods-loan-lead`. "
-        "**ИИН и телефон** передаются в теле — заёмщик может отличаться от клиента в `client_request_id`."
+        "Тело — по `provider_code`. **FF**: запись в БД (`installment__application_create`) и "
+        "Freedom `goods-loan-lead`; в ответе ссылка и QR для клиента. **BIF**: та же функция БД "
+        "(взнос, день платежа, срок ожидания 3 рабочих дня) и BI Finance "
+        "`/api/callbacks/mortgage/orders` с partnerId `SR-<id>`; `uuid` в ответе — appId банка, "
+        "ссылки нет. Отказ BI Finance — его `message` в `detail`. 504 — банк не ответил: повторный "
+        "вызов с теми же условиями отправит ту же заявку с тем же partnerId. "
+        "**ИИН и телефон** — заёмщика, он может отличаться от клиента в `client_request_id`."
     ),
     responses=CREATE_APPLICATION_RESPONSES,
 )
 async def create_application(
     _: InstallmentBasicAuthDep,
     context: IntegrationContextDep,
-    request: CreateInstallmentApplicationRequest,
+    request: CreateApplicationRequest,
     ff_service: FFServiceDep,
+    bif_service: BIFServiceDep,
 ) -> CreateInstallmentApplicationResponse:
     if context is not None:
         context.require_client_request(SCOPE_INSTALLMENT, request.client_request_id)
         request = request.model_copy(
             update={"created_by": employee_id_from_context(context, fallback=request.created_by)}
         )
+    if isinstance(request, CreateBIFApplicationRequest):
+        return await bif_service.create_application(request)
     return await ff_service.create_application(request)
 
 
@@ -216,7 +225,10 @@ async def apply_application(
     "/applications/{application_id}/poll",
     response_model=InstallmentApplicationResponse,
     summary="Опрос статуса в FF",
-    description="Вызывает FF `goods-application-info/{uuid}` и обновляет заявку в БД.",
+    description=(
+        "Вызывает FF `goods-application-info/{uuid}` и обновляет заявку в БД. "
+        "Только Freedom: для BI Finance 409 (статусы приходят от банка)."
+    ),
     responses=APPLICATION_RESPONSES,
 )
 async def poll_application(
@@ -241,7 +253,8 @@ async def poll_application(
         "Отправляет в Freedom `goods-loan-refund` по выданной рассрочке. REFUND — весь остаток займа, "
         "PARTIAL_REFUND — часть (`refund_amount` меньше остатка). Банк отвечает сразу, итог (Colvir) "
         "приходит хуком на `/webhook/refund`; полный успешный возврат закрывает заявку (REVERSED). "
-        "504 — банк не ответил: запрос мог дойти, итог подтянет хук или `/reconcile`."
+        "504 — банк не ответил: запрос мог дойти, итог подтянет хук или `/reconcile`. "
+        "Только Freedom: для BI Finance 409, возврат отмечается через `/refund/manual`."
     ),
 )
 async def create_refund(

@@ -1,4 +1,4 @@
-"""Shared by installment and factoring: a credit product may only be opened on
+"""Shared by the installment providers: a credit product may only be opened on
 the deal's main, client-confirmed client request. Anything else ends up with a
 credit that CRM does not show (crm_deal_one_preset hides unconfirmed requests)
 or that is later cancelled together with a non-main request."""

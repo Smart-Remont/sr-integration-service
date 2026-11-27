@@ -1,6 +1,6 @@
 """MyNCA as PHP ``MyNcaClient`` calls it, for the routes moved from PHP.
 
-Unlike the factoring client it follows no redirect and does not raise: failures are values, as PHP
+It follows no redirect and does not raise: failures are values, as PHP
 returned them. No method logs a request or an answer: they can carry a company key and its password,
 a document or a signer's IIN.
 """

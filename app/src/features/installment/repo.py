@@ -1,17 +1,18 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from src.repository import BaseRepository, scalar_from_sp_rows
+from src.shared.advisory_lock import advisory_lock_key
 from src.shared.deal_guard import fetch_deal_client_request_state
 
-from ..schemas import InstallmentApplicationResponse
+from .schemas import InstallmentApplicationResponse
 
 
 @dataclass(slots=True, frozen=True)
-class FFProvider:
+class InstallmentProvider:
     id: int
     code: str
     base_url: str
@@ -19,33 +20,46 @@ class FFProvider:
 
 
 @dataclass(slots=True, frozen=True)
-class FFCredential:
+class ProviderCredential:
     username: str
     password: str
 
 
 @dataclass(slots=True, frozen=True)
-class FFToken:
+class ProviderToken:
     access_token: str
     refresh_token: str | None
     expires_at: datetime
 
 
 @dataclass(slots=True, frozen=True)
-class FFWebhookCredential:
+class WebhookCredential:
     username: str
     password_hash: str
 
 
 @dataclass(slots=True, frozen=True)
-class FFWebhookApplication:
+class WebhookApplication:
     id: int
     status: str
     approved_params: dict[str, Any] | None
 
 
 @dataclass(slots=True, frozen=True)
-class FFAllowedBank:
+class ApplicationRef:
+    id: int
+    status: str
+
+
+@dataclass(slots=True, frozen=True)
+class ApplicationBorrower:
+    iin: str | None
+    mobile_phone: str | None
+    bank_id: int | None
+
+
+@dataclass(slots=True, frozen=True)
+class AllowedBank:
     bank_id: int
     provider_product_id: str | None
     bank_code: str
@@ -53,8 +67,8 @@ class FFAllowedBank:
     credit_program_id: int
 
 
-class FFRepository(BaseRepository):
-    async def get_provider_by_code(self, code: str) -> FFProvider | None:
+class InstallmentRepository(BaseRepository):
+    async def get_provider_by_code(self, code: str) -> InstallmentProvider | None:
         rows = await self.call_sp(
             "public.installment__provider_get",
             code,
@@ -73,14 +87,14 @@ class FFRepository(BaseRepository):
         else:
             config = {}
 
-        return FFProvider(
+        return InstallmentProvider(
             id=row["id"],
             code=row["code"],
             base_url=row["base_url"],
             config=config,
         )
 
-    async def get_active_credentials(self, provider_id: int, env: str) -> FFCredential | None:
+    async def get_active_credentials(self, provider_id: int, env: str) -> ProviderCredential | None:
         rows = await self.call_sp(
             "public.installment__credential_get_active",
             provider_id,
@@ -91,12 +105,12 @@ class FFRepository(BaseRepository):
         if not rows:
             return None
         row = rows[0]
-        return FFCredential(
+        return ProviderCredential(
             username=row["username"],
             password=row["password"],
         )
 
-    async def get_token(self, provider_id: int) -> FFToken | None:
+    async def get_token(self, provider_id: int) -> ProviderToken | None:
         rows = await self.call_sp(
             "public.installment__token_get",
             provider_id,
@@ -106,7 +120,7 @@ class FFRepository(BaseRepository):
         if not rows:
             return None
         row = rows[0]
-        return FFToken(
+        return ProviderToken(
             access_token=row["access_token"],
             refresh_token=row["refresh_token"],
             expires_at=row["expires_at"],
@@ -148,6 +162,9 @@ class FFRepository(BaseRepository):
         mobile_phone: str,
         installment_product_id: int | None = None,
         status: str = "NEW",
+        initial_fee: Decimal | None = None,
+        payment_day: int | None = None,
+        expires_at: datetime | None = None,
     ) -> int:
         payload = {
             "client_request_id": client_request_id,
@@ -164,6 +181,12 @@ class FFRepository(BaseRepository):
         }
         if installment_product_id is not None:
             payload["installment_product_id"] = installment_product_id
+        if initial_fee is not None:
+            payload["initial_fee"] = str(initial_fee)
+        if payment_day is not None:
+            payload["payment_day"] = payment_day
+        if expires_at is not None:
+            payload["expires_at"] = expires_at.isoformat()
         scalar_result = scalar_from_sp_rows(
             await self.call_sp(
                 "public.installment__application_create",
@@ -278,9 +301,10 @@ class FFRepository(BaseRepository):
     @staticmethod
     def _json_result(raw: Any) -> dict[str, Any]:
         if isinstance(raw, str):
-            raw = json.loads(raw)
+            # Decimal, not float: money keeps its digits (900000.00, not 900000.0).
+            raw = json.loads(raw, parse_float=Decimal)
         if not isinstance(raw, dict):
-            raise RuntimeError("Unexpected installment refund function result.")
+            raise RuntimeError("Unexpected installment function result.")
         return raw
 
     async def list_for_reconcile(self, *, stale_minutes: int, limit: int) -> list[dict[str, Any]]:
@@ -370,9 +394,8 @@ class FFRepository(BaseRepository):
         *,
         exclude_application_id: int | None = None,
     ) -> Decimal:
-        """Sum of active/issued principal across BOTH installment and
-        factoring for this deal (public.cr_deal_committed_amount, shared with
-        factoring/ff/repo.py). Several hunters can work the same deal in
+        """Sum of active/issued principal of all applications of this deal
+        (public.cr_deal_committed_amount). Several hunters can work the same deal in
         parallel — their combined principal must not exceed the deal amount."""
         row = await self.fetchrow(
             "SELECT public.cr_deal_committed_amount($1::bigint, $2::bigint) AS committed",
@@ -384,9 +407,7 @@ class FFRepository(BaseRepository):
     async def get_deal_client_request_state(self, client_request_id: int) -> dict[str, Any] | None:
         return await fetch_deal_client_request_state(self, client_request_id)
 
-    async def get_provider_webhook_credentials(
-        self, code: str = "FF"
-    ) -> FFWebhookCredential | None:
+    async def get_provider_webhook_credentials(self, code: str = "FF") -> WebhookCredential | None:
         rows = await self.call_sp(
             "public.installment__provider_webhook_credentials_get",
             code,
@@ -404,13 +425,13 @@ class FFRepository(BaseRepository):
         if not isinstance(password_hash, str) or not password_hash.strip():
             return None
 
-        return FFWebhookCredential(username=username, password_hash=password_hash)
+        return WebhookCredential(username=username, password_hash=password_hash)
 
     async def get_application_by_reference_or_uuid(
         self,
         reference_id: str | None,
         uuid: str | None,
-    ) -> FFWebhookApplication | None:
+    ) -> WebhookApplication | None:
         if reference_id is None and uuid is None:
             return None
 
@@ -429,7 +450,7 @@ class FFRepository(BaseRepository):
         if isinstance(approved_params, str):
             approved_params = json.loads(approved_params)
 
-        return FFWebhookApplication(
+        return WebhookApplication(
             id=row["id"],
             status=row["status"],
             approved_params=approved_params if isinstance(approved_params, dict) else None,
@@ -576,3 +597,158 @@ class FFRepository(BaseRepository):
         if scalar_result is None:
             raise RuntimeError("Failed to apply installment application to deal.")
         return int(scalar_result)
+
+    # --- BI Finance ----------------------------------------------------------------
+
+    async def get_deal_seller(self, client_request_id: int) -> dict[str, Any] | None:
+        """Legal entity of the deal's company (initiator_company_tab): BI Finance pays it."""
+        rows = await self.call_sp(
+            "public.installment__client_request_get_for_apply",
+            client_request_id,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "company_id": row.get("company_id"),
+            "bin": row.get("seller_bin"),
+            "name": row.get("seller_name"),
+            "iban": row.get("seller_iban"),
+        }
+
+    async def find_application_by_uuid(
+        self, provider_code: str, uuid: str
+    ) -> ApplicationRef | None:
+        rows = await self.call_sp(
+            "public.installment__application_find_by_uuid",
+            provider_code,
+            uuid,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        if not rows:
+            return None
+        return ApplicationRef(id=int(rows[0]["id"]), status=str(rows[0]["status"]))
+
+    async def count_applications_awaiting_bank_number(self, provider_code: str) -> int:
+        return int(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__applications_awaiting_bank_number",
+                    provider_code,
+                    module_code="MYSPACE",
+                )
+            )
+            or 0
+        )
+
+    async def get_application_borrower(self, application_id: int) -> ApplicationBorrower | None:
+        rows = await self.call_sp(
+            "public.installment__application_borrower_get",
+            application_id,
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return ApplicationBorrower(
+            iin=row["iin"], mobile_phone=row["mobile_phone"], bank_id=row["bank_id"]
+        )
+
+    async def lock_token_renewal(self, provider_id: int) -> None:
+        """Until the end of the transaction: one worker renews the token, the others wait and
+        then take the new one (the gateway answers 429 to frequent logins)."""
+        await self.call_sp(
+            "pg_catalog.pg_advisory_xact_lock",
+            advisory_lock_key(f"installment-token:{provider_id}"),
+            module_code="MYSPACE",
+        )
+
+    async def update_application_from_bif(
+        self,
+        *,
+        application_id: int,
+        status: str,
+        approved_params: dict[str, Any] | None,
+        comment: str | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "application_id": application_id,
+            "status": status,
+            "approved_params": approved_params,
+            "comment": comment,
+        }
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__application_update_from_bif",
+                    json.dumps(payload),
+                    module_code="MYSPACE",
+                )
+            )
+        )
+
+    async def expire_applications(self, *, limit: int) -> dict[str, Any]:
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__applications_expire", limit, module_code="MYSPACE"
+                )
+            )
+        )
+
+    async def refund_manual(
+        self,
+        *,
+        application_id: int,
+        amount: Decimal,
+        comment: str,
+        created_by: int,
+        refunded_at: date | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "application_id": application_id,
+            "amount": str(amount),
+            "comment": comment,
+            "created_by": created_by,
+            "refunded_at": refunded_at.isoformat() if refunded_at is not None else None,
+        }
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__application_refund_manual",
+                    json.dumps(payload),
+                    session_user_id=created_by,
+                    module_code="MYSPACE",
+                )
+            )
+        )
+
+    # --- MySpace «Рассрочки» --------------------------------------------------------
+
+    async def list_applications_for_oa(self, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = await self.call_sp(
+            "public.installment__oa_applications_list",
+            json.dumps(filters),
+            cursor=True,
+            module_code="MYSPACE",
+        )
+        result = []
+        for row in rows:
+            item = dict(row)
+            if isinstance(item.get("approved_params"), str):
+                item["approved_params"] = json.loads(item["approved_params"])
+            result.append(item)
+        return result
+
+    async def get_oa_stats(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return self._json_result(
+            scalar_from_sp_rows(
+                await self.call_sp(
+                    "public.installment__oa_stats", json.dumps(filters), module_code="MYSPACE"
+                )
+            )
+        )

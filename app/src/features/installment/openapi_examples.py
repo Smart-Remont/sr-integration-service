@@ -254,3 +254,79 @@ WEBHOOK_ACK_RESPONSES = {
         },
     },
 }
+
+BIF_CREATE_APPLICATION_REQUEST = {
+    "client_request_id": 2916069,
+    "provider_code": "BIF",
+    "bank_id": 101,
+    "iin": "900101300123",
+    "mobile_phone": "+77010000000",
+    "principal": 1000000,
+    "period": 12,
+    "initial_fee": 0,
+    "payment_day": 10,
+    "created_by": 42,
+}
+
+BIF_CREATE_APPLICATION_RESPONSE = {
+    "id": 15,
+    "uuid": "1042",
+    "reference_id": "SR-15",
+    "status": "IN_PROGRESS",
+    "redirect_url": None,
+    "redirect_qr": None,
+    "provider_code": "BIF",
+}
+
+BIF_WEBHOOK_APPROVED = {
+    "appId": "1042",
+    "status": "APPROVED",
+    "approvedConditions": {
+        "amount": 1000000,
+        "termMonths": 12,
+        "rate": 24.9,
+        "monthlyPayment": 95000,
+    },
+    "comment": "",
+}
+
+BIF_WEBHOOK_ISSUED = {"appId": "1042", "status": "ISSUED"}
+
+MANUAL_REFUND_REQUEST = {
+    "amount": 1000000,
+    "comment": "Заявление №12 от 20.11, перевод п/п 345",
+    "created_by": 42,
+    "refunded_at": "2026-11-24",
+}
+
+OA_STATS_RESPONSE = {
+    "providers": [
+        {
+            "provider_code": "BIF",
+            "total_count": 3,
+            "total_amount": 3500000,
+            "by_status": [
+                {"status": "ISSUED", "count": 1, "amount": 1000000},
+                {"status": "REJECTED", "count": 2, "amount": 2500000},
+            ],
+            "issued_count": 1,
+            "issued_amount": 1000000,
+            "conversion": 0.3333,
+            "refunded_count": 0,
+            "refunded_amount": 0,
+        }
+    ],
+    "total": {
+        "total_count": 3,
+        "total_amount": 3500000,
+        "by_status": [
+            {"status": "ISSUED", "count": 1, "amount": 1000000},
+            {"status": "REJECTED", "count": 2, "amount": 2500000},
+        ],
+        "issued_count": 1,
+        "issued_amount": 1000000,
+        "conversion": 0.3333,
+        "refunded_count": 0,
+        "refunded_amount": 0,
+    },
+}

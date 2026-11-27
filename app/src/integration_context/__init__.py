@@ -1,6 +1,5 @@
 from .constants import (
     INTEGRATION_CONTEXT_HEADER,
-    SCOPE_FACTORING,
     SCOPE_INSTALLMENT,
     SCOPE_STORAGE,
 )
@@ -9,7 +8,6 @@ from .token import IntegrationContext, sign_integration_context, verify_integrat
 
 __all__ = [
     "INTEGRATION_CONTEXT_HEADER",
-    "SCOPE_FACTORING",
     "SCOPE_INSTALLMENT",
     "SCOPE_STORAGE",
     "IntegrationContext",

@@ -16,14 +16,14 @@ def test_sign_and_verify_roundtrip():
     token = sign_integration_context(
         secret=SECRET,
         employee_id=42,
-        scopes=["factoring"],
-        ctx={"factoring": {"cr": 2916069, "app": 123}},
+        scopes=["storage"],
+        ctx={"storage": {"cr": 2916069, "app": 123}},
     )
     ctx = verify_integration_context(token, secret=SECRET)
     assert ctx.employee_id == 42
-    assert ctx.scopes == ("factoring",)
-    assert ctx.ctx["factoring"]["cr"] == 2916069
-    assert ctx.ctx["factoring"]["app"] == 123
+    assert ctx.scopes == ("storage",)
+    assert ctx.ctx["storage"]["cr"] == 2916069
+    assert ctx.ctx["storage"]["app"] == 123
 
 
 def test_require_client_request_match():
@@ -41,12 +41,12 @@ def test_require_client_request_mismatch():
     token = sign_integration_context(
         secret=SECRET,
         employee_id=1,
-        scopes=["factoring"],
-        ctx={"factoring": {"cr": 100}},
+        scopes=["storage"],
+        ctx={"storage": {"cr": 100}},
     )
     ctx = verify_integration_context(token, secret=SECRET)
     with pytest.raises(HTTPException) as exc:
-        ctx.require_client_request("factoring", 999)
+        ctx.require_client_request("storage", 999)
     assert exc.value.status_code == 403
 
 
@@ -54,7 +54,7 @@ def test_expired_token():
     token = sign_integration_context(
         secret=SECRET,
         employee_id=1,
-        scopes=["factoring"],
+        scopes=["storage"],
         ttl_seconds=-1,
     )
     time.sleep(0.01)
@@ -66,7 +66,7 @@ def test_invalid_signature():
     token = sign_integration_context(
         secret=SECRET,
         employee_id=1,
-        scopes=["factoring"],
+        scopes=["storage"],
     )
     tampered = token[:-4] + "xxxx"
     with pytest.raises(IntegrationContextError, match="signature"):

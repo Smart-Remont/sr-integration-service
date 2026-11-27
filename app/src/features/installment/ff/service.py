@@ -1,21 +1,24 @@
-import base64
-import binascii
-import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from secrets import compare_digest
 from typing import Any
 
 import segno
-from asyncpg.exceptions import PostgresError
-from bcrypt import checkpw
 from fastapi import HTTPException, status
 from loguru import logger
 
 from src.exceptions import StoredProcedureError
-from src.shared.deal_guard import check_deal_client_request_state
 
+from ..common import (
+    check_webhook_login,
+    extract_error_message,
+    invalid_webhook_credentials,
+    log_event,
+    normalize_iin,
+    require_deal_main_client_request,
+)
+from ..constants import ProviderCode
+from ..repo import InstallmentProvider, InstallmentRepository, WebhookCredential
 from ..schemas import (
     AllowedBankListResponse,
     AllowedBankResponse,
@@ -33,9 +36,6 @@ from ..schemas import (
     WebhookAckResponse,
 )
 from .client import FFClient, FFClientError
-from .repo import FFProvider, FFRepository, FFWebhookCredential
-
-_PG_RAISE_MESSAGE_RE = re.compile(r"\{([^}]*)\}")
 
 # Statuses of a goods-loan application the bank reports in hooks and poll
 # (FF docs: hooks — REJECTED/APPROVED/ALTERNATIVE/ISSUED, poll — the rest).
@@ -89,9 +89,17 @@ APPLY_UNKNOWN_DETAIL = (
 
 TOKEN_FALLBACK_TTL = timedelta(minutes=55)
 
+BIF_POLL_DETAIL = "Статусы BI Finance приходят от банка: опроса у BI Finance нет."
+BIF_REFUND_DETAIL = (
+    "Возврат через банк — только Freedom. Возврат BI Finance отмечается вручную "
+    "(POST /applications/{id}/refund/manual)."
+)
+
 
 class FFService:
-    def __init__(self, ff_repository: FFRepository, ff_client: FFClient, app_env: str) -> None:
+    def __init__(
+        self, ff_repository: InstallmentRepository, ff_client: FFClient, app_env: str
+    ) -> None:
         self.ff_repository = ff_repository
         self.ff_client = ff_client
         self.app_env = app_env
@@ -206,7 +214,7 @@ class FFService:
             )
         await self._require_deal_budget(request.client_request_id, request.principal)
 
-        # Committed before the bank call: see FFRepository.committed.
+        # Committed before the bank call: see InstallmentRepository.committed.
         application_id = await self.ff_repository.committed(
             lambda repo: repo.insert_application(
                 client_request_id=request.client_request_id,
@@ -449,6 +457,11 @@ class FFService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Application id={application_id} was not found.",
             )
+        if application.provider_code != ProviderCode.FF:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=BIF_POLL_DETAIL,
+            )
         if application.uuid is None or not application.uuid.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -685,7 +698,7 @@ class FFService:
 
     async def _call_with_reauth(
         self,
-        provider: FFProvider,
+        provider: InstallmentProvider,
         call: Callable[[str], Awaitable[dict[str, Any]]],
     ) -> dict[str, Any]:
         """Run `call(access_token)` against the bank, logging in again once on 401.
@@ -787,6 +800,8 @@ class FFService:
         marks REQUESTED before the call, committed: a second click is refused and
         a lost answer is resolved by the bank's hook or by reconcile."""
         application = await self.get_application_by_id(application_id)
+        if application.provider_code != ProviderCode.FF:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BIF_REFUND_DETAIL)
         provider = await self._require_provider()
         # The result arrives only as a hook: without our hook credentials the
         # bank cannot report it.
@@ -981,7 +996,7 @@ class FFService:
                 error=clear_exc,
             )
 
-    def _refund_hook_url(self, provider: FFProvider) -> str:
+    def _refund_hook_url(self, provider: InstallmentProvider) -> str:
         explicit = provider.config.get("refund_hook_url")
         if isinstance(explicit, str) and explicit.strip():
             return explicit.strip()
@@ -996,7 +1011,7 @@ class FFService:
         except ArithmeticError:
             return None
 
-    async def _require_provider(self) -> FFProvider:
+    async def _require_provider(self) -> InstallmentProvider:
         provider = await self.ff_repository.get_provider_by_code("FF")
         if provider is None:
             raise HTTPException(
@@ -1005,14 +1020,14 @@ class FFService:
             )
         return provider
 
-    async def _ensure_valid_token(self, provider: FFProvider) -> str:
+    async def _ensure_valid_token(self, provider: InstallmentProvider) -> str:
         token = await self.ff_repository.get_token(provider.id)
         now = datetime.now(UTC)
         if token is not None and token.expires_at > now + timedelta(seconds=30):
             return token.access_token
         return await self._authenticate_and_store_token(provider)
 
-    async def _authenticate_and_store_token(self, provider: FFProvider) -> str:
+    async def _authenticate_and_store_token(self, provider: InstallmentProvider) -> str:
         credentials = await self.ff_repository.get_active_credentials(provider.id, self.app_env)
         if credentials is None:
             raise HTTPException(
@@ -1055,8 +1070,7 @@ class FFService:
         return access_token
 
     async def _require_deal_main_client_request(self, client_request_id: int) -> None:
-        state = await self.ff_repository.get_deal_client_request_state(client_request_id)
-        check_deal_client_request_state(state, client_request_id)
+        await require_deal_main_client_request(self.ff_repository, client_request_id)
 
     async def _require_deal_budget(
         self,
@@ -1087,7 +1101,7 @@ class FFService:
             )
 
     @staticmethod
-    def _required_config_value(provider: FFProvider, key: str) -> str:
+    def _required_config_value(provider: InstallmentProvider, key: str) -> str:
         value = provider.config.get(key)
         if isinstance(value, str) and value.strip():
             return value
@@ -1097,14 +1111,14 @@ class FFService:
         )
 
     @staticmethod
-    def _provider_resolve_ip(provider: FFProvider) -> str | None:
+    def _provider_resolve_ip(provider: InstallmentProvider) -> str | None:
         value = provider.config.get("resolve_ip")
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
 
     @classmethod
-    def _ff_request_kwargs(cls, provider: FFProvider) -> dict[str, str | None]:
+    def _ff_request_kwargs(cls, provider: InstallmentProvider) -> dict[str, str | None]:
         return {
             "base_url": provider.base_url,
             "resolve_ip": cls._provider_resolve_ip(provider),
@@ -1113,7 +1127,7 @@ class FFService:
     def _build_apply_payload(
         self,
         *,
-        provider: FFProvider,
+        provider: InstallmentProvider,
         iin: str,
         phone: str,
         request: CreateInstallmentApplicationRequest,
@@ -1146,14 +1160,7 @@ class FFService:
             },
         }
 
-    @staticmethod
-    def _normalize_iin(iin: str | None) -> str | None:
-        if iin is None:
-            return None
-        normalized = "".join(symbol for symbol in iin if symbol.isdigit())
-        if len(normalized) != 12:
-            return None
-        return normalized
+    _normalize_iin = staticmethod(normalize_iin)
 
     @staticmethod
     def _normalize_phone(raw_phone: str | None) -> str | None:
@@ -1190,7 +1197,7 @@ class FFService:
             detail=detail,
         )
 
-    async def _require_webhook_credentials(self) -> FFWebhookCredential:
+    async def _require_webhook_credentials(self) -> WebhookCredential:
         credentials = await self.ff_repository.get_provider_webhook_credentials(code="FF")
         if credentials is None:
             raise HTTPException(
@@ -1207,14 +1214,7 @@ class FFService:
         if credentials is None:
             raise self._invalid_webhook_credentials_exception()
 
-        username, password = self._parse_basic_authorization_header(authorization_header)
-        if username is None or password is None:
-            raise self._invalid_webhook_credentials_exception()
-
-        username_ok = compare_digest(username.encode(), credentials.username.encode())
-        password_ok = self._verify_webhook_password(password, credentials)
-        if not (username_ok and password_ok):
-            raise self._invalid_webhook_credentials_exception()
+        check_webhook_login(credentials, authorization_header)
 
     @staticmethod
     def _extract_string(payload: dict[str, Any], key: str) -> str | None:
@@ -1294,37 +1294,6 @@ class FFService:
         except Exception as exc:
             logger.warning("QR render failed | error={error}", error=exc)
             return None
-
-    @staticmethod
-    def _parse_basic_authorization_header(
-        header_value: str | None,
-    ) -> tuple[str | None, str | None]:
-        if header_value is None or not header_value.startswith("Basic "):
-            return None, None
-
-        token = header_value[6:].strip()
-        if not token:
-            return None, None
-
-        try:
-            decoded = base64.b64decode(token, validate=True).decode("utf-8")
-        except binascii.Error, UnicodeDecodeError:
-            return None, None
-
-        if ":" not in decoded:
-            return None, None
-        username, password = decoded.split(":", 1)
-        return username, password
-
-    @staticmethod
-    def _verify_webhook_password(password: str, credentials: FFWebhookCredential) -> bool:
-        try:
-            return checkpw(password.encode(), credentials.password_hash.encode())
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Invalid webhook password hash configuration.",
-            ) from exc
 
     async def _try_auto_apply_on_issued(self, application_id: int) -> bool:
         application = await self.ff_repository.get_application_by_id(application_id)
@@ -1443,73 +1412,13 @@ class FFService:
         installment_id: int | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
-        redacted = self._redact_pii(payload or {})
-        try:
-            # Committed on its own: an HTTP error later in the request must not
-            # erase the audit of what was sent to and received from the bank.
-            await self.ff_repository.committed(
-                lambda repo: repo.insert_event_log(
-                    installment_id=installment_id,
-                    event_type=event_type,
-                    payload=redacted,
-                    source=source,
-                )
-            )
-        except Exception as exc:
-            logger.warning(
-                "Event log write failed | event_type={event_type} installment_id={installment_id} error={error}",
-                event_type=event_type,
-                installment_id=installment_id,
-                error=str(exc),
-            )
-
-    @staticmethod
-    def _extract_error_message(exc: Exception) -> str:
-        if isinstance(exc, HTTPException):
-            return str(exc.detail)
-        cause: BaseException | None = exc
-        while cause is not None:
-            if isinstance(cause, PostgresError):
-                text = str(cause)
-                match = _PG_RAISE_MESSAGE_RE.search(text)
-                return match.group(1) if match else text
-            cause = cause.__cause__
-        return str(exc)
-
-    @staticmethod
-    def _redact_pii(value: Any) -> Any:
-        if isinstance(value, dict):
-            redacted: dict[str, Any] = {}
-            for key, item in value.items():
-                lowered = key.lower()
-                if (
-                    lowered
-                    in {
-                        "iin",
-                        "mobile_phone",
-                        "phone",
-                        "prop_iin",
-                        "prop_phone",
-                        "first_name",
-                        "last_name",
-                        "middle_name",
-                        "fio",
-                    }
-                    or lowered.endswith("_iin")
-                    or "phone" in lowered
-                ):
-                    redacted[key] = "***"
-                else:
-                    redacted[key] = FFService._redact_pii(item)
-            return redacted
-        if isinstance(value, list):
-            return [FFService._redact_pii(item) for item in value]
-        return value
-
-    @staticmethod
-    def _invalid_webhook_credentials_exception() -> HTTPException:
-        return HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
+        await log_event(
+            self.ff_repository,
+            event_type,
+            source=source,
+            installment_id=installment_id,
+            payload=payload,
         )
+
+    _extract_error_message = staticmethod(extract_error_message)
+    _invalid_webhook_credentials_exception = staticmethod(invalid_webhook_credentials)
